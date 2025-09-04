@@ -583,7 +583,7 @@ j = (
 assert parse_service_account(j)["project_id"] == "p"
 
     # 3) Code-fenced JSON (as users often paste)
-    jf = (
+jf = (
         "```json
 "
         "{\"type\":\"service_account\",\"project_id\":\"p\",\"private_key_id\":\"k\"," 
