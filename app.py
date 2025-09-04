@@ -5,13 +5,13 @@ This version removes roster uploads entirely. Families enter all info **directly
 and a **photo is required** (camera or file upload). Each submission is stored in Google Sheets
 and the photo is uploaded to a Google Drive folder you control.
 
-Brand: **Photograph BY TR, LLC** · Studio emails: photographbytr@gmail.com; trossiter@photographybytr.com
+Brand: **Photograph BY TR, LLC** · Studio emails: photorgraphbytr@gmail.com; trossiter@photographybytr.com
 
 NEW (per your request)
 - ✅ No roster uploads; kiosk collects First/Last/Team/contacts/jersey/etc.
 - ✅ **Required photo** (uses device camera with `st.camera_input` or file uploader)
 - ✅ Photo stored to **Google Drive**; file link & id saved to `Checkins` sheet
-- ✅ Fields kept: SiblingLink, Paid toggle, OrgName (from Settings)
+- ✅ Fields kept: Paid toggle, OrgName (from Settings)
 
 ----------
 QUICK DEPLOY (Streamlit Community Cloud)
@@ -90,7 +90,7 @@ DEMO_MODE = str(st.secrets.get("DEMO_MODE", "")).strip().lower() in {"1","true",
 BRAND_NAME = "Photograph BY TR, LLC"
 BRAND_PRIMARY = "#111827"
 BRAND_ACCENT = "#f59e0b"
-BRAND_EMAILS = "photographbytr@gmail.com; trossiter@photographybytr.com"
+BRAND_EMAILS = "trossiter@photographbytr.com; photographbytr@gmail.com; rosskid0911@gmail.com"
 
 # ----------------------------- Branding --------------------------------------
 BRAND_CSS = f"""
@@ -104,6 +104,14 @@ h1,h2,h3 {{ color: var(--brand-primary) !important; }}
 """
 
 # ----------------------------- Helpers ---------------------------------------
+
+def make_qr_image(payload: str, box_size: int = 10) -> Image.Image:
+    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M,
+                       box_size=box_size, border=4)
+    qr.add_data(payload)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+    return img
 
 def slugify(s: str) -> str:
     return "".join(ch for ch in (s or "") if ch.isalnum()).lower()
@@ -180,7 +188,7 @@ def get_google():
         ("Checkins", [
             "ts","player_id","short_code","first_name","last_name","team","parent_email","parent_phone",
             "confirmed_email","confirmed_phone","jersey","confirmed_jersey","package","notes","release_accepted",
-            "checked_in_by","sibling_link","paid","org_name","brand","brand_emails",
+            "paid","org_name","brand","brand_emails",
             "photo_filename","photo_drive_id","photo_link"
         ]),
         ("Settings", ["key","value"]),
@@ -285,35 +293,21 @@ def export_section(checkins: pd.DataFrame):
         file_name=f"checkins_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
         type="primary"
     )
-    if not checkins.empty and "Team" in checkins.columns:
-        teams = sorted([t for t in checkins["Team"].dropna().unique() if str(t).strip()])
+    team_col = "Team" if "Team" in checkins.columns else ("team" if "team" in checkins.columns else None)
+    if not checkins.empty and team_col:
+        teams = sorted([t for t in checkins[team_col].dropna().unique() if str(t).strip()])
         if teams:
             team = st.selectbox("Per‑Team export", teams)
-            team_df = checkins[checkins["Team"].astype(str).str.lower() == str(team).lower()]
+            team_df = checkins[checkins[team_col].astype(str).str.lower() == str(team).lower()]
             st.download_button(
                 f"Download {team} Check‑Ins",
                 data=team_df.to_csv(index=False).encode("utf-8"),
                 file_name=f"checkins_{slugify(team)}.csv"
             )
 
+    st.info("This build has **no roster**. All data comes from the kiosk form with required photo upload.")
 
-def settings_section():
-    st.subheader("Event / Organization Settings")
-    if DEMO_MODE:
-        st.warning("DEMO_MODE is ON — the app will not write to Google Sheets or Drive. Turn it off by removing/setting DEMO_MODE to false in Secrets.")
-    org_default = gs_get_setting("ORG_NAME", "")
-    org_name = st.text_input("Organization / League Name (shown on kiosk)", value=org_default)
-    if st.button("Save Settings"):
-        gs_set_setting("ORG_NAME", org_name)
-        st.success("Settings saved.")
-    if LOGO_URL:
-        st.image(LOGO_URL, caption="Logo (from LOGO_URL secret)", width=220)
-    else:
-        st.caption("Add a logo by setting a LOGO_URL secret with a direct link to an image.")
-
-    with st.expander("Connection Test", expanded=False):
-        if DEMO_MODE:
-            st.info("DEMO_MODE: skipping live tests. Turn off DEMO_MODE to test Google connections.")
+"DEMO_MODE: skipping live tests. Turn off DEMO_MODE to test Google connections.")
         else:
             fmt = "mapping (TOML table)" if isinstance(GCP_SERVICE_ACCOUNT, Mapping) else ("string (JSON)" if isinstance(GCP_SERVICE_ACCOUNT, str) else str(type(GCP_SERVICE_ACCOUNT)))
             st.text(f"Detected GCP_SERVICE_ACCOUNT format: {fmt}")
@@ -351,16 +345,27 @@ def page_manager():
     with st.expander("Settings", expanded=True):
         settings_section()
 
-    st.subheader("Kiosk Link")
-st.write("Share your app URL with `?mode=kiosk` appended. Example:")
-st.code("https://YOUR-APP-URL/?mode=kiosk")
-st.caption("Tip: copy your current browser URL and add ?mode=kiosk (all lowercase, no spaces).")
+    st.subheader("Share & QR")
+    st.caption("Paste your deployed app URL below and we'll generate the kiosk link + QR.")
+    base_url = st.text_input("Your app URL", placeholder="https://your-app.streamlit.app")
+    if base_url:
+        base_url = base_url.strip()
+        if "?" in base_url:
+            base_url = base_url.split("?")[0]
+        kiosk_link = base_url.rstrip("/") + "/?mode=kiosk"
+        st.write("**Kiosk link:**")
+        st.code(kiosk_link)
+        img = make_qr_image(kiosk_link, box_size=8)
+        st.image(img, caption="Scan to open kiosk", width=240)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        st.download_button("Download QR (PNG)", data=buf.getvalue(), file_name="kiosk_qr.png", type="primary")
 
-checkins = sb_load_checkins()
-with st.expander("Exports", expanded=True):
-    export_section(checkins)
+    checkins = sb_load_checkins()
+    with st.expander("Exports", expanded=True):
+        export_section(checkins)
 
-st.info("This build has **no roster**. All data comes from the kiosk form with required photo upload.")
+    st.info("This build has **no roster**. All data comes from the kiosk form with required photo upload.")
 
 # ----------------------------- Kiosk UI --------------------------------------
 
@@ -380,16 +385,14 @@ def page_kiosk():
             last = st.text_input("Player Last Name", max_chars=50)
             team = st.text_input("Team / Division", max_chars=80)
             jersey = st.text_input("Jersey #", max_chars=10)
-            sibling = st.text_input("SiblingLink (optional)")
             paid = st.toggle("Paid (prepay or on‑site)", value=False)
         with colB:
             parent_email = st.text_input("Parent Email (for final photo delivery)")
             parent_phone = st.text_input("Parent Phone")
             pkg = st.selectbox("Photo Package (optional)", ["Not selected","Basic","Deluxe","Team+Individual"]) 
-            notes = st.text_area("Notes (pose requests, siblings, etc.)")
+            notes = st.text_area("Notes (pose requests, etc.)")
             release = st.checkbox("I agree to the photo release/policy")
-            staff = st.text_input("Checked in by (staff initials)")
-
+            
         st.markdown("**Photo (required)** — choose one:")
         cam = st.camera_input("Take photo with camera (preferred)")
         up = st.file_uploader("Or upload an image file", type=["jpg","jpeg","png","heic","webp"])  # some browsers provide jpeg/png only
@@ -448,10 +451,7 @@ def page_kiosk():
             "confirmed_jersey": str(jersey),
             "package": pkg,
             "notes": notes,
-            "release_accepted": bool(release),
-            "checked_in_by": staff,
-            "sibling_link": sibling,
-            "paid": "TRUE" if paid else "FALSE",
+            "release_accepted": bool(release),            "paid": "TRUE" if paid else "FALSE",
             "org_name": org_name,
             "brand": BRAND_NAME,
             "brand_emails": BRAND_EMAILS,
@@ -478,3 +478,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
