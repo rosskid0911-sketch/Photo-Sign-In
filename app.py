@@ -32,7 +32,7 @@ QUICK DEPLOY (Streamlit Community Cloud)
    DRIVE_FOLDER_ID = "YOUR_DRIVE_FOLDER_ID" # Google Drive folder where photos will upload
    MANAGER_PIN = "9690"                     # change this
    # LOGO_URL = "https://.../your-logo.png" # optional
-   # DEMO_MODE = "1"                        # optional: show UI without Google
+
 
 3) In Google Sheets, create tabs: **Checkins**, **Settings** (exact spelling).
 4) In Google Drive, create a folder for photos; copy its **Folder ID** from the URL.
