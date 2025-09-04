@@ -561,26 +561,34 @@ def _run_smoke_tests():
     assert len(sc) == 6
 
     # Parse service account tests
-    # 1) Mapping/table
-    m = {"type":"service_account","project_id":"p","private_key_id":"k","private_key":"-----BEGIN PRIVATE KEY-----X}
+    # 1) Mapping/table with a JSON-style private_key using 
+ escapes
+    m = {
+        "type":"service_account",
+        "project_id":"p",
+        "private_key_id":"k",
+        "private_key":"-----BEGIN PRIVATE KEY-----
+X
 -----END PRIVATE KEY-----
-","client_email":"a@p.iam.gserviceaccount.com","client_id":"1","token_uri":"https://oauth2.googleapis.com/token"}
+",
+        "client_email":"a@p.iam.gserviceaccount.com",
+        "client_id":"1",
+        "token_uri":"https://oauth2.googleapis.com/token"
+    }
     assert parse_service_account(m)["client_email"].endswith("iam.gserviceaccount.com")
-    # 2) JSON string
-    j = '{"type":"service_account","project_id":"p","private_key_id":"k","private_key":"-----BEGIN PRIVATE KEY-----
-X
------END PRIVATE KEY-----
-","client_email":"a@p.iam.gserviceaccount.com","client_id":"1","token_uri":"https://oauth2.googleapis.com/token"}'
+
+    # 2) JSON string (note the double-escaped 
+ to keep it valid JSON *inside* a Python string)
+    j = "{\"type\":\"service_account\",\"project_id\":\"p\",\"private_key_id\":\"k\",\"private_key\":\"-----BEGIN PRIVATE KEY-----\nX\n-----END PRIVATE KEY-----\n\",\"client_email\":\"a@p.iam.gserviceaccount.com\",\"client_id\":\"1\",\"token_uri\":\"https://oauth2.googleapis.com/token\"}"
     assert parse_service_account(j)["project_id"] == "p"
-    # 3) Code‑fenced JSON
+
+    # 3) Code‑fenced JSON (as often pasted in Secrets)
     jf = """```json
-{"type":"service_account","project_id":"p","private_key_id":"k","private_key":"-----BEGIN PRIVATE KEY-----
-X
------END PRIVATE KEY-----
-","client_email":"a@p.iam.gserviceaccount.com","client_id":"1","token_uri":"https://oauth2.googleapis.com/token"}
+{\"type\":\"service_account\",\"project_id\":\"p\",\"private_key_id\":\"k\",\"private_key\":\"-----BEGIN PRIVATE KEY-----\nX\n-----END PRIVATE KEY-----\n\",\"client_email\":\"a@p.iam.gserviceaccount.com\",\"client_id\":\"1\",\"token_uri\":\"https://oauth2.googleapis.com/token\"}
 ```"""
     assert parse_service_account(jf)["client_id"] == "1"
-    # 4) Empty / invalid
+
+    # 4) Empty / invalid should raise
     try:
         parse_service_account("")
         assert False, "Expected ValueError for empty secret"
@@ -592,4 +600,3 @@ if str(st.secrets.get("RUN_TESTS", "")).strip() in {"1","true","yes"}:
 
 if __name__ == "__main__":
     main()
-
