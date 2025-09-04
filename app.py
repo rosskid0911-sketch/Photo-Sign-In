@@ -571,7 +571,7 @@ m = {
         "client_id": "1",
         "token_uri": "https://oauth2.googleapis.com/token",
     }
-    assert parse_service_account(m)["client_email"].endswith("iam.gserviceaccount.com")
+assert parse_service_account(m)["client_email"].endswith("iam.gserviceaccount.com")
 
     # 2) JSON string (double-escaped 
  to be valid JSON inside a Python string)
@@ -581,7 +581,7 @@ m = {
         "\"client_email\":\"a@p.iam.gserviceaccount.com\",\"client_id\":\"1\","
         "\"token_uri\":\"https://oauth2.googleapis.com/token\"}"
     )
-    assert parse_service_account(j)["project_id"] == "p"
+assert parse_service_account(j)["project_id"] == "p"
 
     # 3) Code-fenced JSON (as users often paste)
     jf = (
