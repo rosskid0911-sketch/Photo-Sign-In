@@ -552,40 +552,51 @@ def main():
 def _run_smoke_tests():
     # f-string CSS should have doubled braces
     assert "{{" in BRAND_CSS and "}}" in BRAND_CSS
-    # slugify basics
+
+    # slugify + id helpers
     assert slugify("A B-C!") == "abc"
-    # code/short id lengths
-    pid = gen_player_id("A","B","Team")
+    pid = gen_player_id("A", "B", "Team")
     assert len(pid) == 10
     sc = short_code(pid)
     assert len(sc) == 6
 
-    # Parse service account tests
-    # 1) Mapping/table with a JSON-style private_key using 
- escapes
+    # 1) Mapping/table with JSON-style private_key (
+ escapes)
     m = {
-        "type":"service_account",
-        "project_id":"p",
-        "private_key_id":"k",
-        "private_key":"-----BEGIN PRIVATE KEY-----
+        "type": "service_account",
+        "project_id": "p",
+        "private_key_id": "k",
+        "private_key": "-----BEGIN PRIVATE KEY-----
 X
 -----END PRIVATE KEY-----
 ",
-        "client_email":"a@p.iam.gserviceaccount.com",
-        "client_id":"1",
-        "token_uri":"https://oauth2.googleapis.com/token"
+        "client_email": "a@p.iam.gserviceaccount.com",
+        "client_id": "1",
+        "token_uri": "https://oauth2.googleapis.com/token",
     }
     assert parse_service_account(m)["client_email"].endswith("iam.gserviceaccount.com")
 
-    # 2) JSON string (note the double-escaped 
- to keep it valid JSON *inside* a Python string)
-    j = "{\"type\":\"service_account\",\"project_id\":\"p\",\"private_key_id\":\"k\",\"private_key\":\"-----BEGIN PRIVATE KEY-----\nX\n-----END PRIVATE KEY-----\n\",\"client_email\":\"a@p.iam.gserviceaccount.com\",\"client_id\":\"1\",\"token_uri\":\"https://oauth2.googleapis.com/token\"}"
+    # 2) JSON string (double-escaped 
+ to be valid JSON inside a Python string)
+    j = (
+        "{\"type\":\"service_account\",\"project_id\":\"p\",\"private_key_id\":\"k\"," 
+        "\"private_key\":\"-----BEGIN PRIVATE KEY-----\nX\n-----END PRIVATE KEY-----\n\"," 
+        "\"client_email\":\"a@p.iam.gserviceaccount.com\",\"client_id\":\"1\","
+        "\"token_uri\":\"https://oauth2.googleapis.com/token\"}"
+    )
     assert parse_service_account(j)["project_id"] == "p"
 
-    # 3) Code‑fenced JSON (as often pasted in Secrets)
-    jf = """```json
-{\"type\":\"service_account\",\"project_id\":\"p\",\"private_key_id\":\"k\",\"private_key\":\"-----BEGIN PRIVATE KEY-----\nX\n-----END PRIVATE KEY-----\n\",\"client_email\":\"a@p.iam.gserviceaccount.com\",\"client_id\":\"1\",\"token_uri\":\"https://oauth2.googleapis.com/token\"}
-```"""
+    # 3) Code-fenced JSON (as users often paste)
+    jf = (
+        "```json
+"
+        "{\"type\":\"service_account\",\"project_id\":\"p\",\"private_key_id\":\"k\"," 
+        "\"private_key\":\"-----BEGIN PRIVATE KEY-----\nX\n-----END PRIVATE KEY-----\n\","
+        "\"client_email\":\"a@p.iam.gserviceaccount.com\",\"client_id\":\"1\","
+        "\"token_uri\":\"https://oauth2.googleapis.com/token\"}
+"
+        "```"
+    )
     assert parse_service_account(jf)["client_id"] == "1"
 
     # 4) Empty / invalid should raise
@@ -595,7 +606,7 @@ X
     except ValueError:
         pass
 
-if str(st.secrets.get("RUN_TESTS", "")).strip() in {"1","true","yes"}:
+if str(st.secrets.get("RUN_TESTS","")) in {"1","true","yes","True","YES"}:
     _run_smoke_tests()
 
 if __name__ == "__main__":
