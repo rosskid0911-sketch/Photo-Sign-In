@@ -352,15 +352,15 @@ def page_manager():
         settings_section()
 
     st.subheader("Kiosk Link")
-    kiosk_url = st.experimental_get_query_params()
-    base = st.get_option("browser.serverAddress") if hasattr(st, "get_option") else ""
-    st.code("Append ?mode=kiosk to your app URL, e.g. https://your-app.streamlit.app/?mode=kiosk")
+st.write("Share your app URL with `?mode=kiosk` appended. Example:")
+st.code("https://YOUR-APP-URL/?mode=kiosk")
+st.caption("Tip: copy your current browser URL and add ?mode=kiosk (all lowercase, no spaces).")
 
-    checkins = sb_load_checkins()
-    with st.expander("Exports", expanded=True):
-        export_section(checkins)
+checkins = sb_load_checkins()
+with st.expander("Exports", expanded=True):
+    export_section(checkins)
 
-    st.info("This build has **no roster**. All data comes from the kiosk form with required photo upload.")
+st.info("This build has **no roster**. All data comes from the kiosk form with required photo upload.")
 
 # ----------------------------- Kiosk UI --------------------------------------
 
