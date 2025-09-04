@@ -591,7 +591,7 @@ jf = (
         "\"token_uri\":\"https://oauth2.googleapis.com/token\""
         "```"
     )
-    assert parse_service_account(jf)["client_id"] == "1"
+assert parse_service_account(jf)["client_id"] == "1"
 
     # 4) Empty / invalid should raise
     try:
