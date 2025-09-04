@@ -588,7 +588,7 @@ jf = (
         "{\"type\":\"service_account\",\"project_id\":\"p\",\"private_key_id\":\"k\"," 
         "\"private_key\":\"-----BEGIN PRIVATE KEY-----\nX\n-----END PRIVATE KEY-----\n\","
         "\"client_email\":\"a@p.iam.gserviceaccount.com\",\"client_id\":\"1\","
-        "\"token_uri\":\"https://oauth2.googleapis.com/token\"
+        "\"token_uri\":\"https://oauth2.googleapis.com/token\""
         "```"
     )
     assert parse_service_account(jf)["client_id"] == "1"
