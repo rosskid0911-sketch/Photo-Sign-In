@@ -316,23 +316,6 @@ def settings_section():
     else:
         st.caption("Add a logo by setting a LOGO_URL secret with a direct link to an image.")
 
-    with st.expander("Connection Test", expanded=False):
-        if DEMO_MODE:
-            st.info("DEMO_MODE is on; skipping live tests.")
-        else:
-            fmt = "mapping (TOML table)" if isinstance(GCP_SERVICE_ACCOUNT, Mapping) else ("string (JSON)" if isinstance(GCP_SERVICE_ACCOUNT, str) else str(type(GCP_SERVICE_ACCOUNT)))
-            st.text("Detected GCP_SERVICE_ACCOUNT format: " + str(fmt))
-            if st.button("Run connection test"):
-                try:
-                    now = datetime.utcnow().isoformat()
-                    gs_set_setting("HEALTHCHECK", now)
-                    ping = gs_get_setting("HEALTHCHECK", "")
-                    dummy_bytes = b"healthcheck"
-                    fid, link = drive_upload_photo("healthcheck_" + now + ".txt", dummy_bytes, mimetype="text/plain")
-                    st.success("Sheets OK (HEALTHCHECK=" + str(ping) + ") · Drive OK (file id " + str(fid) + ")")
-                except Exception as e:
-                    st.error("Connection test failed. Verify Secrets, sharing on Sheet & Folder, and enabled APIs.")
-                    st.exception(e)
 
 def page_manager():
     st.markdown(BRAND_CSS, unsafe_allow_html=True)
