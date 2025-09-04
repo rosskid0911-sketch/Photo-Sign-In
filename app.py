@@ -562,8 +562,7 @@ def _run_smoke_tests():
 
     # Parse service account tests
     # 1) Mapping/table
-    m = {"type":"service_account","project_id":"p","private_key_id":"k","private_key":"-----BEGIN PRIVATE KEY-----
-X}
+    m = {"type":"service_account","project_id":"p","private_key_id":"k","private_key":"-----BEGIN PRIVATE KEY-----X}
 -----END PRIVATE KEY-----
 ","client_email":"a@p.iam.gserviceaccount.com","client_id":"1","token_uri":"https://oauth2.googleapis.com/token"}
     assert parse_service_account(m)["client_email"].endswith("iam.gserviceaccount.com")
