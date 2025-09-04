@@ -57,14 +57,13 @@ google-api-python-client
 
 from __future__ import annotations
 import io
-import zipfile
 import hashlib
 import json
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Tuple
 
 import pandas as pd
-from rapidfuzz import process, fuzz
+from rapidfuzz import process, fuzz  # (kept for future fuzzy search needs)
 import streamlit as st
 from PIL import Image
 import qrcode
@@ -93,12 +92,23 @@ BRAND_ACCENT = "#f59e0b"
 BRAND_EMAILS = "trossiter@photographbytr.com; photographbytr@gmail.com; rosskid0911@gmail.com"
 
 # ----------------------------- Branding --------------------------------------
+# NOTE: because this is an f-string, ALL literal CSS braces must be doubled {{ }}.
 BRAND_CSS = f"""
 <style>
 :root {{ --brand-primary:{BRAND_PRIMARY}; --brand-accent:{BRAND_ACCENT}; }}
-h1,h2,h3 {{ color: var(--brand-primary) !important; }}
+/* Default (light mode): headings use brand color for identity */
+h1,h2,h3,h4,h5,h6 {{ color: var(--brand-primary) !important; }}
+/* High-contrast for dark mode so the title 'Photograph BY TR, LLC' stays readable */
+@media (prefers-color-scheme: dark) {{
+  /* The error was previously caused by an invalid '#' comment here */
+  h1,h2,h3,h4,h5,h6 {{ color: #f9fafb !important; }} /* near-white */
+  .brand-hero {{ background: rgba(245,158,11,0.25) !important; border-left-color: #fbbf24 !important; }}
+}}
 .stButton>button {{ border-radius: 12px; }}
-.brand-hero {{ padding:.6rem .9rem; border-left:6px solid var(--brand-accent); background: rgba(245,158,11,.07); margin:.6rem 0 .8rem; }}
+.brand-hero {{
+  padding: .6rem .9rem; border-left: 6px solid var(--brand-accent);
+  background: rgba(245,158,11,.07); margin: .6rem 0 .8rem;
+}}
 .badge {{ display:inline-block; padding:2px 8px; border-radius:999px; background:var(--brand-accent); color:white; font-size:.8rem; margin-left:6px; }}
 </style>
 """
@@ -125,17 +135,15 @@ def short_code(pid: str) -> str:
 
 # Query param compat
 def get_mode_param() -> str:
+    """Use the modern query params API only (avoid mixing with experimental)."""
     try:
-        params = st.query_params
-        mode = params.get("mode", [""])
-        return mode[0] if isinstance(mode, list) else mode
+        val = st.query_params.get("mode", "")
+        if isinstance(val, list):
+            return val[0] if val else ""
+        return val or ""
     except Exception:
-        try:
-            params = st.experimental_get_query_params()
-            mode = params.get("mode", [""])
-            return mode[0] if isinstance(mode, list) else mode
-        except Exception:
-            return ""
+        # On very old Streamlit, just default to manager view
+        return ""
 
 # ----------------------------- Google Clients --------------------------------
 @st.cache_resource(show_spinner=False)
@@ -270,7 +278,7 @@ def sb_load_checkins() -> pd.DataFrame:
 
 # Google Drive upload
 
-def drive_upload_photo(filename: str, data: bytes, mimetype: str = "image/jpeg") -> tuple[str,str]:
+def drive_upload_photo(filename: str, data: bytes, mimetype: str = "image/jpeg") -> Tuple[str, str]:
     if DEMO_MODE:
         # Return fake IDs/links in demo mode
         return (f"demo_{filename}", f"https://example.com/{filename}")
@@ -307,18 +315,35 @@ def export_section(checkins: pd.DataFrame):
 
     st.info("This build has **no roster**. All data comes from the kiosk form with required photo upload.")
 
-"DEMO_MODE: skipping live tests. Turn off DEMO_MODE to test Google connections."
-      else:
+
+def settings_section():
+    st.subheader("Event / Organization Settings")
+    if DEMO_MODE:
+        st.warning("DEMO_MODE is ON - the app will not write to Google Sheets or Drive. Turn it off in Secrets to go live.")
+    org_default = gs_get_setting("ORG_NAME", "")
+    org_name = st.text_input("Organization / League Name (shown on kiosk)", value=org_default)
+    if st.button("Save Settings"):
+        gs_set_setting("ORG_NAME", org_name)
+        st.success("Settings saved.")
+    if LOGO_URL:
+        st.image(LOGO_URL, caption="Logo (from LOGO_URL secret)", width=220)
+    else:
+        st.caption("Add a logo by setting a LOGO_URL secret with a direct link to an image.")
+
+    with st.expander("Connection Test", expanded=False):
+        if DEMO_MODE:
+            st.info("DEMO_MODE is on; skipping live tests.")
+        else:
             fmt = "mapping (TOML table)" if isinstance(GCP_SERVICE_ACCOUNT, Mapping) else ("string (JSON)" if isinstance(GCP_SERVICE_ACCOUNT, str) else str(type(GCP_SERVICE_ACCOUNT)))
-            st.text(f"Detected GCP_SERVICE_ACCOUNT format: {fmt}")
+            st.text("Detected GCP_SERVICE_ACCOUNT format: " + str(fmt))
             if st.button("Run connection test"):
                 try:
                     now = datetime.utcnow().isoformat()
                     gs_set_setting("HEALTHCHECK", now)
                     ping = gs_get_setting("HEALTHCHECK", "")
                     dummy_bytes = b"healthcheck"
-                    fid, link = drive_upload_photo(f"healthcheck_{now}.txt", dummy_bytes, mimetype="text/plain")
-                    st.success(f"Sheets OK (HEALTHCHECK={ping}) · Drive OK (file id {fid})")
+                    fid, link = drive_upload_photo("healthcheck_" + now + ".txt", dummy_bytes, mimetype="text/plain")
+                    st.success("Sheets OK (HEALTHCHECK=" + str(ping) + ") · Drive OK (file id " + str(fid) + ")")
                 except Exception as e:
                     st.error("Connection test failed. Verify Secrets, sharing on Sheet & Folder, and enabled APIs.")
                     st.exception(e)
@@ -384,8 +409,11 @@ def page_kiosk():
             first = st.text_input("Player First Name", max_chars=50)
             last = st.text_input("Player Last Name", max_chars=50)
             team = st.text_input("Team / Division", max_chars=80)
-            jersey = st.text_input("Jersey #", max_chars=10)
-            paid = st.toggle("Paid (prepay or on‑site)", value=False)
+            jersey = st.text_input("Jersey # (optional)", max_chars=10)
+            try:
+                paid = st.toggle("Paid (prepay or on-site)", value=False)
+            except Exception:
+                paid = st.checkbox("Paid (prepay or on-site)", value=False)
         with colB:
             parent_email = st.text_input("Parent Email (for final photo delivery)")
             parent_phone = st.text_input("Parent Phone")
@@ -451,7 +479,8 @@ def page_kiosk():
             "confirmed_jersey": str(jersey),
             "package": pkg,
             "notes": notes,
-            "release_accepted": bool(release),            "paid": "TRUE" if paid else "FALSE",
+            "release_accepted": bool(release),
+            "paid": "TRUE" if paid else "FALSE",
             "org_name": org_name,
             "brand": BRAND_NAME,
             "brand_emails": BRAND_EMAILS,
@@ -475,6 +504,22 @@ def main():
         page_manager()
     with tab2:
         page_kiosk()
+
+# ----------------------------- Optional quick tests ---------------------------
+# Enable by setting RUN_TESTS = "1" in Secrets. These never run in production by default.
+def _run_smoke_tests():
+    # f-string CSS should have doubled braces
+    assert "{{" in BRAND_CSS and "}}" in BRAND_CSS
+    # slugify basics
+    assert slugify("A B-C!") == "abc"
+    # code/short id lengths
+    pid = gen_player_id("A","B","Team")
+    assert len(pid) == 10
+    sc = short_code(pid)
+    assert len(sc) == 6
+
+if str(st.secrets.get("RUN_TESTS", "")).strip() in {"1","true","yes"}:
+    _run_smoke_tests()
 
 if __name__ == "__main__":
     main()
