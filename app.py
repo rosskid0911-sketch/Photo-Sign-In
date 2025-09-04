@@ -597,7 +597,7 @@ assert parse_service_account(jf)["client_id"] == "1"
 try:
         parse_service_account("")
         assert False, "Expected ValueError for empty secret"
-    except ValueError:
+except ValueError:
         pass
 
 if str(st.secrets.get("RUN_TESTS","")) in {"1","true","yes","True","YES"}:
