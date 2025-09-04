@@ -560,8 +560,7 @@ def _run_smoke_tests():
     sc = short_code(pid)
     assert len(sc) == 6
 
-    # 1) Mapping/table with JSON-style private_key (
-escapes)
+    # 1) Mapping/table with JSON-style private_key (escapes)
 m = {
         "type": "service_account",
         "project_id": "p",
