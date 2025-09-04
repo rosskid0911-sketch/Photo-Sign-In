@@ -1,0 +1,7 @@
+streamlit
+pandas
+rapidfuzz
+qrcode[pil]
+pillow
+gspread
+google-auth
