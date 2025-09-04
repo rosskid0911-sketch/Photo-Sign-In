@@ -594,7 +594,7 @@ jf = (
 assert parse_service_account(jf)["client_id"] == "1"
 
     # 4) Empty / invalid should raise
-    try:
+try:
         parse_service_account("")
         assert False, "Expected ValueError for empty secret"
     except ValueError:
