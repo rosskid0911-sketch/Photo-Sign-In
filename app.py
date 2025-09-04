@@ -309,7 +309,7 @@ def export_section(checkins: pd.DataFrame):
 
 "DEMO_MODE: skipping live tests. Turn off DEMO_MODE to test Google connections."
 
-      else:
+     else:
             fmt = "mapping (TOML table)" if isinstance(GCP_SERVICE_ACCOUNT, Mapping) else ("string (JSON)" if isinstance(GCP_SERVICE_ACCOUNT, str) else str(type(GCP_SERVICE_ACCOUNT)))
             st.text(f"Detected GCP_SERVICE_ACCOUNT format: {fmt}")
             if st.button("Run connection test"):
