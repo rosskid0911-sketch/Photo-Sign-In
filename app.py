@@ -562,7 +562,7 @@ def _run_smoke_tests():
 
     # 1) Mapping/table with JSON-style private_key (
 escapes
-    m = {
+   m = {
         "type": "service_account",
         "project_id": "p",
         "private_key_id": "k",
