@@ -308,8 +308,7 @@ def export_section(checkins: pd.DataFrame):
     st.info("This build has **no roster**. All data comes from the kiosk form with required photo upload.")
 
 "DEMO_MODE: skipping live tests. Turn off DEMO_MODE to test Google connections."
-
-     else:
+      else:
             fmt = "mapping (TOML table)" if isinstance(GCP_SERVICE_ACCOUNT, Mapping) else ("string (JSON)" if isinstance(GCP_SERVICE_ACCOUNT, str) else str(type(GCP_SERVICE_ACCOUNT)))
             st.text(f"Detected GCP_SERVICE_ACCOUNT format: {fmt}")
             if st.button("Run connection test"):
