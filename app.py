@@ -146,8 +146,349 @@ def get_google():
         return {"sh": None, "drive": None}
 
     if not GSHEET_ID:
-        st.error("M
+        st.error("Missing **GSHEET_ID** secret.")
+        st.stop()
+    if not DRIVE_FOLDER_ID:
+        st.error("Missing **DRIVE_FOLDER_ID** secret (Google Drive folder for photos).")
+        st.stop()
+    if not GCP_SERVICE_ACCOUNT:
+        st.error("Missing **GCP_SERVICE_ACCOUNT** secret.")
+        st.stop()
+
+    # Parse service account: allow TOML table (mapping) or triple-quoted JSON string
+    try:
+        raw = GCP_SERVICE_ACCOUNT
+        if isinstance(raw, Mapping):
+            creds_info = dict(raw)
+        else:
+            s = str(raw).strip()
+            # Strip accidental code fences like ```json ... ```
+            if s.startswith("```"):
+                s = s.strip().strip("`")
+                if s.lower().startswith("json"):
+                    s = s[4:].strip()
+            creds_info = json.loads(s)
+    except Exception as e:
+        st.error(f"Could not parse GCP_SERVICE_ACCOUNT. Use a TOML table or triple-quoted JSON. Error: {e}")
+        st.stop()
+
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    try:
+        creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
+        gc = gspread.authorize(creds)
+        sh = gc.open_by_key(GSHEET_ID)
+        drive = build("drive", "v3", credentials=creds)
+    except Exception as e:
+        st.error("Failed to authenticate or open Google resources. Check sharing, IDs, and enabled APIs.")
+        st.exception(e)
+        st.stop()
+
+    # Ensure worksheets exist with headers
+    for ws_name, cols in [
+        ("Checkins", [
+            "ts","player_id","short_code","first_name","last_name","team","parent_email","parent_phone",
+            "confirmed_email","confirmed_phone","jersey","confirmed_jersey","package","notes","release_accepted",
+            "paid","org_name","brand","brand_emails",
+            "photo_filename","photo_drive_id","photo_link"
+        ]),
+        ("Settings", ["key","value"]),
+    ]:
+        try:
+            ws = sh.worksheet(ws_name)
+            values = ws.get_all_values()
+            if not values:
+                ws.update([cols])
+        except gspread.exceptions.WorksheetNotFound:
+            ws = sh.add_worksheet(title=ws_name, rows=1000, cols=max(20, len(cols)))
+            ws.update([cols])
+
+    return {"sh": sh, "drive": drive}
+
+@st.cache_data(ttl=20, show_spinner=False)
+def gs_read_df(sheet_name: str) -> pd.DataFrame:
+    if DEMO_MODE:
+        return pd.DataFrame()
+    sh = get_google()["sh"]
+    ws = sh.worksheet(sheet_name)
+    values = ws.get_all_values()
+    if not values:
+        return pd.DataFrame()
+    header, rows = values[0], values[1:]
+    df = pd.DataFrame(rows, columns=header).replace({"": pd.NA})
+    return df
+
+def gs_write_df(sheet_name: str, df: pd.DataFrame):
+    if DEMO_MODE:
+        return
+    sh = get_google()["sh"]
+    ws = sh.worksheet(sheet_name)
+    df2 = df.copy().where(pd.notnull(df), "")
+    data = [list(df2.columns)] + df2.astype(str).values.tolist()
+    ws.clear()
+    ws.update(data)
+
+# Settings KV
+SETTINGS_SHEET = "Settings"
+
+def gs_get_setting(key: str, default: str = "") -> str:
+    df = gs_read_df(SETTINGS_SHEET)
+    if df.empty or "key" not in df.columns:
+        return default
+    hit = df[df["key"] == key]
+    if not hit.empty:
+        return str(hit.iloc[0]["value"]) if pd.notna(hit.iloc[0]["value"]) else default
+    return default
+
+def gs_set_setting(key: str, value: str):
+    df = gs_read_df(SETTINGS_SHEET)
+    if df.empty:
+        df = pd.DataFrame([[key, value]], columns=["key","value"])
+    else:
+        if key in df["key"].values:
+            df.loc[df["key"] == key, "value"] = value
+        else:
+            df = pd.concat([df, pd.DataFrame([[key, value]], columns=["key","value"])], ignore_index=True)
+    gs_write_df(SETTINGS_SHEET, df)
+
+# Checkins
+def sb_insert_checkin(row: dict):
+    existing = gs_read_df("Checkins")
+    if existing.empty:
+        new_df = pd.DataFrame([row])
+    else:
+        for col in [c for c in row.keys() if c not in existing.columns]:
+            existing[col] = pd.NA
+        new_df = pd.concat([existing, pd.DataFrame([row])], ignore_index=True)
+    gs_write_df("Checkins", new_df)
+
+@st.cache_data(ttl=20, show_spinner=False)
+def sb_load_checkins() -> pd.DataFrame:
+    return gs_read_df("Checkins")
+
+# Google Drive upload
+def drive_upload_photo(filename: str, data: bytes, mimetype: str = "image/jpeg") -> Tuple[str, str]:
+    if DEMO_MODE:
+        return (f"demo_{filename}", f"https://example.com/{filename}")
+    drive = get_google()["drive"]
+    body = {"name": filename, "parents": [DRIVE_FOLDER_ID], "mimeType": mimetype}
+    media = MediaIoBaseUpload(io.BytesIO(data), mimetype=mimetype, resumable=False)
+    file = drive.files().create(body=body, media_body=media, fields="id, webViewLink, webContentLink").execute()
+    file_id = file.get("id")
+    link = file.get("webViewLink") or file.get("webContentLink") or f"https://drive.google.com/file/d/{file_id}/view"
+    return file_id, link
+
+# ----------------------------- Manager UI ------------------------------------
+def export_section(checkins: pd.DataFrame):
+    st.subheader("Exports")
+    st.dataframe(checkins, use_container_width=True, height=320)
+    st.download_button(
+        "Download Check-Ins CSV",
+        data=checkins.to_csv(index=False).encode("utf-8"),
+        file_name=f"checkins_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+        type="primary"
+    )
+    team_col = "Team" if "Team" in checkins.columns else ("team" if "team" in checkins.columns else None)
+    if not checkins.empty and team_col:
+        teams = sorted([t for t in checkins[team_col].dropna().unique() if str(t).strip()])
+        if teams:
+            team = st.selectbox("Per-Team export", teams)
+            team_df = checkins[checkins[team_col].astype(str).str.lower() == str(team).lower()]
+            st.download_button(
+                f"Download {team} Check-Ins",
+                data=team_df.to_csv(index=False).encode("utf-8"),
+                file_name=f"checkins_{slugify(team)}.csv"
+            )
+
+def settings_section():
+    st.subheader("Event / Organization Settings")
+    if DEMO_MODE:
+        st.warning("DEMO_MODE is ON - the app will not write to Google Sheets or Drive. Turn it off in Secrets to go live.")
+    org_default = gs_get_setting("ORG_NAME", "")
+    org_name = st.text_input("Organization / League Name (shown on kiosk)", value=org_default)
+    if st.button("Save Settings"):
+        gs_set_setting("ORG_NAME", org_name)
+        st.success("Settings saved.")
+    if LOGO_URL:
+        st.image(LOGO_URL, caption="Logo (from LOGO_URL secret)", width=220)
+    else:
+        st.caption("Add a logo by setting a LOGO_URL secret with a direct link to an image.")
+
+    with st.expander("Connection Test", expanded=False):
+        if DEMO_MODE:
+            st.info("DEMO_MODE is on; skipping live tests.")
+        else:
+            fmt = "mapping (TOML table)" if isinstance(GCP_SERVICE_ACCOUNT, Mapping) else ("string (JSON)" if isinstance(GCP_SERVICE_ACCOUNT, str) else str(type(GCP_SERVICE_ACCOUNT)))
+            st.text("Detected GCP_SERVICE_ACCOUNT format: " + str(fmt))
+            if st.button("Run connection test"):
+                try:
+                    now = datetime.utcnow().isoformat()
+                    gs_set_setting("HEALTHCHECK", now)
+                    ping = gs_get_setting("HEALTHCHECK", "")
+                    dummy_bytes = b"healthcheck"
+                    fid, link = drive_upload_photo("healthcheck_" + now + ".txt", dummy_bytes, mimetype="text/plain")
+                    st.success("Sheets OK (HEALTHCHECK=" + str(ping) + ") · Drive OK (file id " + str(fid) + ")")
+                except Exception as e:
+                    st.error("Connection test failed. Verify Secrets, sharing on Sheet & Folder, and enabled APIs.")
+                    st.exception(e)
+
+def page_manager():
+    st.markdown(BRAND_CSS, unsafe_allow_html=True)
+    st.title(f"📸 {BRAND_NAME} — Manager")
+    st.markdown(f"<div class='brand-hero'><strong>Delivery CC:</strong> {BRAND_EMAILS} <span class='badge'>BRAND</span></div>", unsafe_allow_html=True)
+
+    # PIN gate
+    if "auth" not in st.session_state:
+        st.session_state.auth = False
+    if not st.session_state.auth:
+        pin = st.text_input("Enter manager PIN", type="password")
+        if st.button("Unlock"):
+            if pin == MANAGER_PIN:
+                st.session_state.auth = True
+                st.rerun()
+            else:
+                st.error("Incorrect PIN")
+        st.stop()
+
+    with st.expander("Settings", expanded=True):
+        settings_section()
+
+    st.subheader("Share & QR")
+    st.caption("Paste your deployed app URL below and we'll generate the kiosk link + QR.")
+    base_url = st.text_input("Your app URL", placeholder="https://your-app.streamlit.app")
+    if base_url:
+        base_url = base_url.strip()
+        if "?" in base_url:
+            base_url = base_url.split("?")[0]
+        kiosk_link = base_url.rstrip("/") + "/?mode=kiosk"
+        st.write("**Kiosk link:**")
+        st.code(kiosk_link)
+        img = make_qr_image(kiosk_link, box_size=8)
+        st.image(img, caption="Scan to open kiosk", width=240)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        st.download_button("Download QR (PNG)", data=buf.getvalue(), file_name="kiosk_qr.png", type="primary")
+
+    checkins = sb_load_checkins()
+    with st.expander("Exports", expanded=True):
+        export_section(checkins)
+
+    st.info("This build has **no roster**. All data comes from the kiosk form with required photo upload.")
+
+# ----------------------------- Kiosk UI --------------------------------------
+def page_kiosk():
+    st.markdown(BRAND_CSS, unsafe_allow_html=True)
+    if LOGO_URL:
+        st.image(LOGO_URL, width=220)
+    org_name = gs_get_setting("ORG_NAME", "")
+    title_suffix = f" — {org_name}" if org_name else ""
+    st.title(f"✅ {BRAND_NAME} — Photo Day Check-In{title_suffix}")
+    st.caption("Please complete all fields and upload a photo. A staff member can assist if needed.")
+
+    with st.form("kiosk_form", clear_on_submit=True):
+        colA, colB = st.columns(2)
+        with colA:
+            first = st.text_input("Player First Name", max_chars=50)
+            last = st.text_input("Player Last Name", max_chars=50)
+            team = st.text_input("Team / Division", max_chars=80)
+            jersey = st.text_input("Jersey # (optional)", max_chars=10)
+            try:
+                paid = st.toggle("Paid (prepay or on-site)", value=False)
+            except Exception:
+                paid = st.checkbox("Paid (prepay or on-site)", value=False)
+        with colB:
+            parent_email = st.text_input("Parent Email (for final photo delivery)")
+            parent_phone = st.text_input("Parent Phone")
+            pkg = st.selectbox("Photo Package (optional)", ["Not selected", "Basic", "Deluxe", "Team+Individual"])
+            notes = st.text_area("Notes (pose requests, etc.)")
+            release = st.checkbox("I agree to the photo release/policy")
+
+        st.markdown("**Photo (required)** — choose one:")
+        cam = st.camera_input("Take photo with camera (preferred)")
+        up = st.file_uploader("Or upload an image file", type=["jpg","jpeg","png","heic","webp"])
+
+        submitted = st.form_submit_button("Complete Check-In", type="primary")
+
+    if submitted:
+        # Validate
+        if not (first and last and team and parent_email and parent_phone and release):
+            st.error("Please complete all required fields and agree to the release.")
+            return
+        if not (cam or up):
+            st.error("Photo is required. Please use the camera or upload a file.")
+            return
+
+        # Prepare IDs
+        pid = gen_player_id(first, last, team)
+        scode = short_code(pid)
+
+        # Choose photo bytes & mimetype
+        if cam is not None:
+            photo_bytes = cam.getvalue()
+            mimetype = cam.type or "image/jpeg"
+            ext = ".jpg" if "jpeg" in mimetype else ".png"
+        else:
+            photo_bytes = up.getvalue()
+            mimetype = up.type or "image/jpeg"
+            if up.name.lower().endswith((".jpg", ".jpeg")):
+                ext = ".jpg"
+            elif up.name.lower().endswith(".png"):
+                ext = ".png"
+            else:
+                ext = ".jpg"
+
+        # Compose filename
+        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        base_name = f"{slugify(org_name)}_{slugify(team)}_{slugify(last)}_{slugify(first)}_{scode}_{ts}{ext}"
+
+        try:
+            fid, link = drive_upload_photo(base_name, photo_bytes, mimetype=mimetype)
+        except Exception as e:
+            st.error("Photo upload to Google Drive failed. Please alert a staff member.")
+            st.exception(e)
+            return
+
+        new_row = {
+            "ts": datetime.utcnow().isoformat(),
+            "player_id": pid,
+            "short_code": scode,
+            "first_name": first,
+            "last_name": last,
+            "team": team,
+            "parent_email": parent_email,
+            "parent_phone": parent_phone,
+            "confirmed_email": parent_email,
+            "confirmed_phone": parent_phone,
+            "jersey": str(jersey),
+            "confirmed_jersey": str(jersey),
+            "package": pkg,
+            "notes": notes,
+            "release_accepted": bool(release),
+            "paid": "TRUE" if paid else "FALSE",
+            "org_name": org_name,
+            "brand": BRAND_NAME,
+            "brand_emails": BRAND_EMAILS,
+            "photo_filename": base_name,
+            "photo_drive_id": fid,
+            "photo_link": link,
+        }
+        sb_insert_checkin(new_row)
+        st.success("Checked in and photo uploaded! Thank you.")
+
+# ----------------------------- Router ----------------------------------------
+def main():
+    mode = get_mode_param()
+    if mode == "kiosk":
+        page_kiosk()
+        return
+
+    tab1, tab2 = st.tabs(["Manager", "Kiosk (preview)"])
+    with tab1:
+        page_manager()
+    with tab2:
+        page_kiosk()
 
 if __name__ == "__main__":
     main()
-
