@@ -115,6 +115,50 @@ h1,h2,h3,h4,h5,h6 {{ color: var(--brand-primary) !important; }}
 
 # ----------------------------- Helpers ---------------------------------------
 
+def parse_service_account(raw) -> dict:
+    """Robustly parse the service account from Streamlit secrets.
+    Accepts:
+      - a TOML table (mapping) under [GCP_SERVICE_ACCOUNT]
+      - a JSON string (optionally inside ```json fences or quoted)
+    Raises ValueError with actionable guidance instead of a JSONDecodeError.
+    """
+    if raw is None:
+        raise ValueError("GCP_SERVICE_ACCOUNT is missing. In Secrets, add a [GCP_SERVICE_ACCOUNT] table or a triple-quoted JSON block.")
+    if isinstance(raw, Mapping):
+        # Already a TOML table -> dict
+        return dict(raw)
+
+    s = str(raw)
+    if s is None:
+        raise ValueError("GCP_SERVICE_ACCOUNT is not set.")
+    s = s.strip()
+    if not s:
+        raise ValueError("GCP_SERVICE_ACCOUNT is empty. Paste the JSON or use the TOML table format.")
+
+    # Strip accidental code fences: ```json ... ``` or ``` ... ```
+    if s.startswith("```"):
+        stripped = s.strip().strip("`")
+        # handle both ```json and ```
+        if stripped.lower().startswith("json"):
+            stripped = stripped[4:].strip()
+        s = stripped
+
+    # If someone pasted a quoted JSON string (e.g. "{...}") remove outer quotes
+    if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+        inner = s[1:-1].strip()
+        if inner.startswith("{"):
+            s = inner
+
+    # If it still doesn't start with '{', it's not JSON
+    if not s.startswith("{"):
+        raise ValueError("GCP_SERVICE_ACCOUNT is not valid JSON. Use [GCP_SERVICE_ACCOUNT] TOML table or wrap the exact JSON in triple quotes.")
+
+    try:
+        return json.loads(s)
+    except Exception as e:
+        raise ValueError(f"Could not parse JSON in GCP_SERVICE_ACCOUNT: {e}")
+
+
 def make_qr_image(payload: str, box_size: int = 10) -> Image.Image:
     qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M,
                        box_size=box_size, border=4)
@@ -158,23 +202,12 @@ def get_google():
     if not DRIVE_FOLDER_ID:
         st.error("Missing **DRIVE_FOLDER_ID** secret (Google Drive folder for photos).")
         st.stop()
-    if not GCP_SERVICE_ACCOUNT:
-        st.error("Missing **GCP_SERVICE_ACCOUNT** secret.")
-        st.stop()
 
+    # Parse the service account with strong validation
     try:
-        raw = GCP_SERVICE_ACCOUNT
-        if isinstance(raw, Mapping):
-            creds_info = dict(raw)
-        else:
-            s = str(raw).strip()
-            if s.startswith("```"):
-                s = s.strip().strip("`")
-                if s.lower().startswith("json"):
-                    s = s[4:].strip()
-            creds_info = json.loads(s)
-    except Exception as e:
-        st.error(f"Could not parse GCP_SERVICE_ACCOUNT. Use a TOML table or triple‑quoted JSON. Error: {e}")
+        creds_info = parse_service_account(st.secrets.get("GCP_SERVICE_ACCOUNT", None))
+    except ValueError as e:
+        st.error(str(e))
         st.stop()
 
     scopes = [
@@ -187,7 +220,7 @@ def get_google():
         sh = gc.open_by_key(GSHEET_ID)
         drive = build("drive", "v3", credentials=creds)
     except Exception as e:
-        st.error("Failed to authenticate or open Google resources. Check sharing, IDs, APIs.")
+        st.error("Failed to authenticate or open Google resources. Check sharing, IDs, and enabled APIs.")
         st.exception(e)
         st.stop()
 
@@ -334,8 +367,17 @@ def settings_section():
         if DEMO_MODE:
             st.info("DEMO_MODE is on; skipping live tests.")
         else:
-            fmt = "mapping (TOML table)" if isinstance(GCP_SERVICE_ACCOUNT, Mapping) else ("string (JSON)" if isinstance(GCP_SERVICE_ACCOUNT, str) else str(type(GCP_SERVICE_ACCOUNT)))
-            st.text("Detected GCP_SERVICE_ACCOUNT format: " + str(fmt))
+            raw = st.secrets.get("GCP_SERVICE_ACCOUNT", None)
+            fmt = (
+                "mapping (TOML table)" if isinstance(raw, Mapping)
+                else ("string (JSON)" if isinstance(raw, str) else str(type(raw)))
+            )
+            st.text("Detected GCP_SERVICE_ACCOUNT: " + fmt)
+            if isinstance(raw, str):
+                s = raw.strip()
+                st.caption(f"Length: {len(s)} · startswith: {s[:1]!r}")
+            st.text("GSHEET_ID present: " + str(bool(GSHEET_ID)))
+            st.text("DRIVE_FOLDER_ID present: " + str(bool(DRIVE_FOLDER_ID)))
             if st.button("Run connection test"):
                 try:
                     now = datetime.utcnow().isoformat()
@@ -518,8 +560,37 @@ def _run_smoke_tests():
     sc = short_code(pid)
     assert len(sc) == 6
 
+    # Parse service account tests
+    # 1) Mapping/table
+    m = {"type":"service_account","project_id":"p","private_key_id":"k","private_key":"-----BEGIN PRIVATE KEY-----
+X
+-----END PRIVATE KEY-----
+","client_email":"a@p.iam.gserviceaccount.com","client_id":"1","token_uri":"https://oauth2.googleapis.com/token"}
+    assert parse_service_account(m)["client_email"].endswith("iam.gserviceaccount.com")
+    # 2) JSON string
+    j = '{"type":"service_account","project_id":"p","private_key_id":"k","private_key":"-----BEGIN PRIVATE KEY-----
+X
+-----END PRIVATE KEY-----
+","client_email":"a@p.iam.gserviceaccount.com","client_id":"1","token_uri":"https://oauth2.googleapis.com/token"}'
+    assert parse_service_account(j)["project_id"] == "p"
+    # 3) Code‑fenced JSON
+    jf = """```json
+{"type":"service_account","project_id":"p","private_key_id":"k","private_key":"-----BEGIN PRIVATE KEY-----
+X
+-----END PRIVATE KEY-----
+","client_email":"a@p.iam.gserviceaccount.com","client_id":"1","token_uri":"https://oauth2.googleapis.com/token"}
+```"""
+    assert parse_service_account(jf)["client_id"] == "1"
+    # 4) Empty / invalid
+    try:
+        parse_service_account("")
+        assert False, "Expected ValueError for empty secret"
+    except ValueError:
+        pass
+
 if str(st.secrets.get("RUN_TESTS", "")).strip() in {"1","true","yes"}:
     _run_smoke_tests()
 
 if __name__ == "__main__":
     main()
+
