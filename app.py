@@ -574,7 +574,6 @@ m = {
 assert parse_service_account(m)["client_email"].endswith("iam.gserviceaccount.com")
 
    # 2) JSON string (valid JSON inside a Python string; note the double-escaped
-)
 j = (
 "{\"type\":\"service_account\",\"project_id\":\"p\",\"private_key_id\":\"k\","
 "\"private_key\":\"-----BEGIN PRIVATE KEY-----\nX\n-----END PRIVATE KEY-----\n\","
