@@ -566,10 +566,7 @@ m = {
         "type": "service_account",
         "project_id": "p",
         "private_key_id": "k",
-        "private_key": "-----BEGIN PRIVATE KEY-----
-X
------END PRIVATE KEY-----
-",
+        "private_key": "-----BEGIN PRIVATE KEY-----,-----END PRIVATE KEY-----",
         "client_email": "a@p.iam.gserviceaccount.com",
         "client_id": "1",
         "token_uri": "https://oauth2.googleapis.com/token",
