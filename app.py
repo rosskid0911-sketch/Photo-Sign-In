@@ -5,7 +5,7 @@ This version removes roster uploads entirely. Families enter all info **directly
 and a **photo is required** (camera or file upload). Each submission is stored in Google Sheets
 and the photo is uploaded to a Google Drive folder you control.
 
-Brand: **Photograph BY TR, LLC** · Studio emails: photorgraphbytr@gmail.com; trossiter@photographybytr.com
+Brand: **Photograph BY TR, LLC** · Studio emails: photographbytr@gmail.com; trossiter@photographybytr.com
 
 NEW (per your request)
 - ✅ No roster uploads; kiosk collects First/Last/Team/contacts/jersey/etc.
@@ -90,7 +90,7 @@ DEMO_MODE = str(st.secrets.get("DEMO_MODE", "")).strip().lower() in {"1","true",
 BRAND_NAME = "Photograph BY TR, LLC"
 BRAND_PRIMARY = "#111827"
 BRAND_ACCENT = "#f59e0b"
-BRAND_EMAILS = "photorgraphbytr@gmail.com; trossiter@photographybytr.com"
+BRAND_EMAILS = "photographbytr@gmail.com; trossiter@photographybytr.com"
 
 # ----------------------------- Branding --------------------------------------
 BRAND_CSS = f"""
