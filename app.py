@@ -482,31 +482,40 @@ def main():
 
 # ----------------------------- Optional smoke tests ---------------------------
 def _run_smoke_tests():
-    """Run only if RUN_TESTS is set in Secrets."""
-    # f-string CSS has doubled braces
+    """Runs only when RUN_TESTS is set in Secrets."""
+    # CSS f-string has doubled braces
     assert "{{" in BRAND_CSS and "}}" in BRAND_CSS
     # helper basics
     assert slugify("A B-C!") == "abc"
-    pid = gen_player_id("A", "B", "Team")
-    assert len(pid) == 10
-    sc = short_code(pid)
-    assert len(sc) == 6
-    # parse_service_account mapping
-    m = {"type":"service_account","project_id":"p","private_key_id":"k","private_key":"KEY","client_email":"a@p.iam.gserviceaccount.com","client_id":"1","token_uri":"https://oauth2.googleapis.com/token"}
-    d = parse_service_account(m)
-    assert d["project_id"] == "p"
-    # parse_service_account JSON string (no newlines needed)
-    j = '{"type":"service_account","project_id":"p","private_key_id":"k","private_key":"KEY","client_email":"a@p.iam.gserviceaccount.com","client_id":"1","token_uri":"https://oauth2.googleapis.com/token"}'
-    d2 = parse_service_account(j)
-    assert d2["client_email"].endswith("iam.gserviceaccount.com")
-    # empty should raise
+    pid = gen_player_id("A", "B", "Team"); assert len(pid) == 10
+    sc = short_code(pid); assert len(sc) == 6
+
+    # parse_service_account accepts a TOML-style mapping (dict)
+    m = {
+        "type": "service_account",
+        "project_id": "p",
+        "private_key_id": "k",
+        # NOTE: keep this a short placeholder; do NOT add real newlines here
+        "private_key": "KEY",
+        "client_email": "a@p.iam.gserviceaccount.com",
+        "client_id": "1",
+        "token_uri": "https://oauth2.googleapis.com/token"
+    }
+    d = parse_service_account(m); assert d["project_id"] == "p"
+
+    # parse_service_account accepts a JSON string as well
+    j = "{\"type\":\"service_account\",\"project_id\":\"p\",\"private_key_id\":\"k\",\"private_key\":\"KEY\",\"client_email\":\"a@p.iam.gserviceaccount.com\",\"client_id\":\"1\",\"token_uri\":\"https://oauth2.googleapis.com/token\"}"
+    d2 = parse_service_account(j); assert d2["client_email"].endswith("iam.gserviceaccount.com")
+
+    # empty value should raise
     try:
         parse_service_account("")
         raise AssertionError("Expected ValueError for empty secret")
     except ValueError:
         pass
 
-if str(st.secrets.get("RUN_TESTS", "")).strip().lower() in {"1","true","yes"}:
+# Only run when explicitly enabled in Secrets
+if str(st.secrets.get("RUN_TESTS", "")).strip().lower() in {"1", "true", "yes"}:
     _run_smoke_tests()
 
 if __name__ == "__main__":
