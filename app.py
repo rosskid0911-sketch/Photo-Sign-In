@@ -9,6 +9,10 @@ Brand: Photograph BY TR, LLC
 
 from __future__ import annotations
 
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+from google.cloud import storage
+
 import io
 import hashlib
 import json
@@ -249,7 +253,26 @@ def sb_load_checkins() -> pd.DataFrame:
     return gs_read_df("Checkins")
 
 # Google Drive upload
-def drive_upload_photo(filename: str, data: bytes, mimetype: str = "image/jpeg") -> Tuple[str, str]:
+def gcs_upload_photo(filename: str, data: bytes, mimetype: str = "image/jpeg"):
+    # Build a storage client from the same service account info
+    creds_info = parse_service_account(st.secrets.get("GCP_SERVICE_ACCOUNT"))
+    client = storage.Client.from_service_account_info(creds_info)
+    bucket = client.bucket(st.secrets["GCS_BUCKET"])
+    blob = bucket.blob(filename)
+    blob.upload_from_string(data, content_type=mimetype)
+
+    # Make public (simple). If you prefer signed URLs, ask me and I’ll swap to signed URLs.
+    try:
+        blob.make_public()
+        url = blob.public_url
+    except Exception:
+        # Fallback: long-lived signed URL if public ACLs are restricted
+        url = blob.generate_signed_url(version="v4", expiration=60*60*24*365, method="GET")
+    return blob.name, url
+def drive_upload_photo(filename: str, data: bytes, mimetype: str = "image/jpeg"):
+    # If a GCS bucket is configured, use it instead of Drive
+    if st.secrets.get("GCS_BUCKET"):
+        return gcs_upload_photo(filename, data, mimetype)
     if DEMO_MODE:
         return (f"demo_{filename}", f"https://example.com/{filename}")
     drive = get_google()["drive"]
