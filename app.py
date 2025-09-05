@@ -254,12 +254,34 @@ def sb_load_checkins() -> pd.DataFrame:
 
 # Google Drive upload
 def gcs_upload_photo(filename: str, data: bytes, mimetype: str = "image/jpeg"):
-    # Build a storage client from the same service account info
     creds_info = parse_service_account(st.secrets.get("GCP_SERVICE_ACCOUNT"))
     client = storage.Client.from_service_account_info(creds_info)
-    bucket = client.bucket(st.secrets["GCS_BUCKET"])
+    bucket_name = st.secrets["GCS_BUCKET"]
+    bucket = client.bucket(bucket_name)
     blob = bucket.blob(filename)
+
+    # Upload
     blob.upload_from_string(data, content_type=mimetype)
+
+    # Try to make public; if UBLA blocks ACLs, fall back to a signed URL (max 7 days)
+    try:
+        blob.make_public()
+        url = blob.public_url
+    except Exception:
+        # Configurable TTL via Secrets; clamp to [1, 7] days to satisfy GCS limits
+        raw = st.secrets.get("GCS_SIGNED_URL_TTL_DAYS", 7)
+        try:
+            ttl_days = int(str(raw))
+        except Exception:
+            ttl_days = 7
+        ttl_days = max(1, min(7, ttl_days))
+        url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(days=ttl_days),
+            method="GET",
+        )
+    return blob.name, url
+
 
     # Make public (simple). If you prefer signed URLs, ask me and I’ll swap to signed URLs.
     try:
