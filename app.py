@@ -49,8 +49,9 @@ DRIVE_FOLDER_ID = st.secrets.get("DRIVE_FOLDER_ID", "")
 MANAGER_PIN = st.secrets.get("MANAGER_PIN", "9690")
 LOGO_URL = st.secrets.get("LOGO_URL", "")
 DEMO_MODE = str(st.secrets.get("DEMO_MODE", "")).strip().lower() in {"1", "true", "yes"}
-CASHAPP_URL = st.secrets.get("https://cash.app/$photobyTR", "")
-PAYPAL_URL  = st.secrets.get("https://paypal.me/photographbytr/0", "")
+CASHAPP_URL = st.secrets.get("CASHAPP_URL", "") or "https://cash.app/$photobyTR"
+PAYPAL_URL  = st.secrets.get("PAYPAL_URL", "")  or "https://paypal.me/photographbytr/0"
+
 
 
 # Branding
