@@ -7,6 +7,10 @@ Each submission writes a row to Google Sheets and uploads the photo to a Drive f
 Brand: Photograph BY TR, LLC
 """
 
+import base64, io
+from pathlib import Path
+import requests  # add 'requests' to requirements.txt
+
 from __future__ import annotations
 
 from googleapiclient.discovery import build
@@ -129,6 +133,32 @@ def display_logo(width: int = 220):
           "(e.g., Drive ‘uc?export=view&id=…’ or a GitHub raw URL), "
           "or add assets/logo.png to your repo."
         )
+@st.cache_data(show_spinner=False)
+def load_logo_bytes() -> tuple[bytes | None, str | None]:
+    """Front-load the logo once and reuse it everywhere."""
+    # Prefer local assets (most reliable)
+    for p in ("assets/logo.png", "assets/logo.jpg", "logo.png", "logo.jpg"):
+        if Path(p).exists():
+            return Path(p).read_bytes(), ("image/png" if p.lower().endswith(".png") else "image/jpeg")
+    # Fallback to LOGO_URL
+    url = (LOGO_URL or "").strip()
+    if url:
+        try:
+            r = requests.get(url, timeout=10)
+            r.raise_for_status()
+            ct = r.headers.get("content-type", "image/png")
+            return r.content, ct
+        except Exception:
+            return None, None
+    return None, None
+
+def display_logo(width: int = 220):
+    data, ct = load_logo_bytes()
+    if data:
+        st.image(io.BytesIO(data), width=width)
+    else:
+        st.caption("Logo failed to load. Use a public direct image URL in LOGO_URL, "
+                   "or add assets/logo.png to the repo.")
 
 
 # --------------------- Robust service account parsing -------------------------
