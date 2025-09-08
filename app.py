@@ -27,6 +27,9 @@ import streamlit as st
 from PIL import Image
 import qrcode
 
+from pathlib import Path
+
+
 # Google
 import gspread
 from google.oauth2.service_account import Credentials
@@ -100,6 +103,33 @@ def get_mode_param() -> str:
         return val or ""
     except Exception:
         return ""
+def display_logo(width: int = 220):
+    """Show logo from LOGO_URL first; if that fails, try common local paths."""
+    src = (LOGO_URL or "").strip()
+    tried = []
+    if src:
+        try:
+            st.image(src, width=width)
+            return
+        except Exception as e:
+            tried.append(("LOGO_URL", src, str(e)))
+
+    for p in ("assets/logo.png", "assets/logo.jpg", "logo.png", "logo.jpg"):
+        if Path(p).exists():
+            try:
+                st.image(p, width=width)
+                return
+            except Exception as e:
+                tried.append(("local", p, str(e)))
+
+    # If nothing worked, show a gentle hint once
+    if tried:
+        st.caption(
+          "Logo failed to load. Ensure LOGO_URL is a public, direct image link "
+          "(e.g., Drive ‘uc?export=view&id=…’ or a GitHub raw URL), "
+          "or add assets/logo.png to your repo."
+        )
+
 
 # --------------------- Robust service account parsing -------------------------
 def parse_service_account(raw) -> dict:
@@ -340,10 +370,7 @@ def settings_section():
         gs_set_setting("ORG_NAME", org_name)
         st.success("Settings saved.")
 
-    if LOGO_URL:
-        st.image(LOGO_URL, caption="Logo (from LOGO_URL secret)", width=220)
-    else:
-        st.caption("Add a logo by setting a LOGO_URL secret with a direct link to an image.")
+    display_logo(width=220)
 
     # -------- Connection Test (only runs when DEMO_MODE is OFF) --------
     with st.expander("Connection Test", expanded=False):
