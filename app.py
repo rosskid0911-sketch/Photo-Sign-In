@@ -49,6 +49,9 @@ DRIVE_FOLDER_ID = st.secrets.get("DRIVE_FOLDER_ID", "")
 MANAGER_PIN = st.secrets.get("MANAGER_PIN", "9690")
 LOGO_URL = st.secrets.get("LOGO_URL", "")
 DEMO_MODE = str(st.secrets.get("DEMO_MODE", "")).strip().lower() in {"1", "true", "yes"}
+CASHAPP_URL = st.secrets.get("CASHAPP_URL", "")
+PAYPAL_URL  = st.secrets.get("PAYPAL_URL", "")
+
 
 # Branding
 BRAND_NAME = "Photograph BY TR, LLC"
@@ -158,6 +161,42 @@ def display_logo(width: int = 220):
     else:
         st.caption("Logo failed to load. Use a public direct image URL in LOGO_URL, "
                    "or add assets/logo.png to the repo.")
+def payment_footer():
+    # simple styling for nice buttons
+    st.markdown("""
+    <style>
+      .pay-wrap { display:flex; gap:16px; flex-wrap:wrap; margin: 1rem 0 0; }
+      .pay-btn {
+        display:inline-block; padding:10px 14px; border-radius:12px;
+        font-weight:700; text-decoration:none; color:white;
+        box-shadow: 0 2px 6px rgba(0,0,0,.15);
+      }
+      .pay-btn.cashapp { background:#16a34a; } /* green */
+      .pay-btn.paypal  { background:#0070ba; } /* paypal blue */
+      .pay-note { font-size:.9rem; opacity:.8; margin-top:.25rem; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.divider()
+    st.subheader("Pay for your photo package")
+    st.caption("Tap a button or scan a code to pay. Be sure to toggle **Paid** in the form above.")
+
+    col1, col2 = st.columns(2)
+    if CASHAPP_URL:
+        with col1:
+            st.markdown(f'<a class="pay-btn cashapp" href="{CASHAPP_URL}" target="_blank" rel="noopener">Pay with Cash App</a>', unsafe_allow_html=True)
+            st.image(make_qr_image(CASHAPP_URL, box_size=6), caption="Scan to pay (Cash App)", width=160)
+            st.text(CASHAPP_URL)
+    else:
+        col1.caption("Cash App link not set.")
+
+    if PAYPAL_URL:
+        with col2:
+            st.markdown(f'<a class="pay-btn paypal" href="{PAYPAL_URL}" target="_blank" rel="noopener">Pay with PayPal</a>', unsafe_allow_html=True)
+            st.image(make_qr_image(PAYPAL_URL, box_size=6), caption="Scan to pay (PayPal)", width=160)
+            st.text(PAYPAL_URL)
+    else:
+        col2.caption("PayPal link not set.")
 
 
 # --------------------- Robust service account parsing -------------------------
@@ -572,7 +611,7 @@ def page_kiosk():
         }
         sb_insert_checkin(new_row)
         st.success("Checked in and photo uploaded! Thank you.")
-
+payment_footer()
 # ----------------------------- Router ----------------------------------------
 def main():
     mode = get_mode_param()
