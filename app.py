@@ -6,12 +6,11 @@ Each submission writes a row to Google Sheets and uploads the photo to a Drive f
 
 Brand: Photograph BY TR, LLC
 """
+from __future__ import annotations
 
 import base64, io
 from pathlib import Path
 import requests  # add 'requests' to requirements.txt
-
-from __future__ import annotations
 
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
