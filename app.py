@@ -446,12 +446,15 @@ def page_manager():
 # ----------------------------- Kiosk UI --------------------------------------
 def page_kiosk():
     st.markdown(BRAND_CSS, unsafe_allow_html=True)
-    if LOGO_URL:
-        st.image(LOGO_URL, width=220)
+
+    # show logo from LOGO_URL or fall back to assets/logo.png
+    display_logo(width=220)
+
     org_name = gs_get_setting("ORG_NAME", "")
     title_suffix = f" — {org_name}" if org_name else ""
-    st.title(f" {BRAND_NAME} — Photo Day Check-In{title_suffix}")
+    st.title(f"{BRAND_NAME} — Photo Day Check-In{title_suffix}")
     st.caption("Please complete all fields and upload a photo. A staff member can assist if needed.")
+
 
     with st.form("kiosk_form", clear_on_submit=True):
         colA, colB = st.columns(2)
