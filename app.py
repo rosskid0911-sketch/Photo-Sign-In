@@ -272,15 +272,18 @@ def get_google():
         st.stop()
 
     # Ensure worksheets & headers
-    for ws_name, cols in [
-        ("Checkins", [
-            "ts","player_id","short_code","first_name","last_name","team","parent_email","parent_phone",
-            "confirmed_email","confirmed_phone","jersey","confirmed_jersey","package","notes","release_accepted",
-            "paid","org_name","brand","brand_emails",
-            "photo_filename","photo_drive_id","photo_link"
-        ]),
-        ("Settings", ["key","value"]),
-    ]:
+    # Ensure worksheets & headers
+for ws_name, cols in [
+    ("Checkins", [
+        "ts","player_id","short_code","first_name","last_name","team","parent_email","parent_phone",
+        "confirmed_email","confirmed_phone","jersey","confirmed_jersey","package","notes","release_accepted",
+        "paid","org_name","brand","brand_emails",
+        "photo_filename","photo_drive_id","photo_link"
+    ]),
+    ("Settings", ["key","value"]),
+    ("Packages", ["id","name","price","active","note"]),  # ← add this line
+]:
+
         try:
             ws = sh.worksheet(ws_name)
             values = ws.get_all_values()
@@ -313,7 +316,8 @@ def gs_write_df(sheet_name: str, df: pd.DataFrame):
     df2 = df.copy().where(pd.notnull(df), "")
     data = [list(df2.columns)] + df2.astype(str).values.tolist()
     ws.clear()
-    ws.update(data)# --- Packages helpers (NEW) ---
+    ws.update(data)
+  # --- Packages helpers (NEW) ---
 def ensure_packages_df(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize columns & types; seed defaults if empty."""
     if df is None or df.empty or "name" not in df.columns:
@@ -441,33 +445,6 @@ def gs_set_setting(key: str, value: str):
             df.loc[df["key"] == key, "value"] = value
         else:
             df = pd.concat([df, pd.DataFrame([[key, value]], columns=["key","value"])], ignore_index=True)
-    gs_write_df(SETTINGS_SHEET, df)
-
-    edited = st.data_editor(
-        df,
-        num_rows="dynamic",
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "id":   st.column_config.TextColumn("ID (auto if blank)", help="Uppercase ID; leave blank to auto-generate"),
-            "name": st.column_config.TextColumn("Package Name"),
-            "price": st.column_config.NumberColumn("Price ($)", min_value=0.0, step=1.0, format="$%.2f"),
-            "active": st.column_config.CheckboxColumn("Show in kiosk"),
-            "note": st.column_config.TextColumn("Note (optional)"),
-        },
-    )
-
-    col1, col2 = st.columns([1,1])
-    with col1:
-        if st.button("Save packages", type="primary"):
-            if str(st.secrets.get("DEMO_MODE","0")).strip() in {"1","true","True"}:
-                st.warning("DEMO_MODE is ON. Turn it off to save to Google Sheets.")
-            else:
-                gs_write_packages(edited)
-                st.success("Packages saved.")
-                st.rerun()
-    with col2:
-        st.info("Tip: Keep prices numeric. You can hide a package by unchecking **Show in kiosk**.")
 
 # Check-ins
 def sb_insert_checkin(row: dict):
@@ -661,36 +638,6 @@ def settings_section():
                 st.success("Checkins cleared.")
                 st.rerun()
 
-with st.expander("Data management (Danger Zone)", expanded=False):
-    chk_name = _checkins_sheet_name()
-    current_rows = gs_count_checkins()
-    st.write(f"**Sheet:** `{chk_name}`  ·  **Rows:** {current_rows}")
-
-    colA, colB = st.columns([3, 2])
-    with colA:
-        archive_first = st.checkbox("Archive to a new tab before clearing", value=True)
-        note = st.text_input("Optional archive note", value="", placeholder="e.g., End of Saturday session")
-        confirm = st.text_input('Type **CLEAR** to confirm', value="")
-    with colB:
-        st.info("This will remove all rows from the **Checkins** tab. "
-                "Archiving creates a new tab with a timestamped copy.")
-
-    disabled = confirm.strip().upper() != "CLEAR" or (current_rows == 0)
-    btn_label = "Archive & Clear" if archive_first else "Clear now"
-    if st.button(btn_label, type="primary", disabled=disabled):
-        if str(st.secrets.get("DEMO_MODE", "0")).strip() in {"1","true","True"}:
-            st.warning("DEMO_MODE is on. Turn it off to modify Google Sheets.")
-        else:
-            archived = ""
-            archived_rows = 0
-            if archive_first and current_rows > 0:
-                archived, archived_rows = gs_archive_checkins(note=note)
-                if archived_rows > 0:
-                    st.success(f"Archived {archived_rows} rows → new tab: **{archived}**")
-
-            gs_clear_checkins()
-            st.success("Checkins cleared.")
-            st.rerun()
 
 def page_manager():
     st.markdown(BRAND_CSS, unsafe_allow_html=True)
