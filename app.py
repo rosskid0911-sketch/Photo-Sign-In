@@ -313,7 +313,56 @@ def gs_write_df(sheet_name: str, df: pd.DataFrame):
     df2 = df.copy().where(pd.notnull(df), "")
     data = [list(df2.columns)] + df2.astype(str).values.tolist()
     ws.clear()
-    ws.update(data)
+    ws.update(data)# --- Packages helpers (NEW) ---
+def ensure_packages_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize columns & types; seed defaults if empty."""
+    if df is None or df.empty or "name" not in df.columns:
+        # Use your DEFAULT_PACKAGES constant
+        return pd.DataFrame(DEFAULT_PACKAGES).copy()
+
+    df = df.copy()
+    # Ensure columns exist
+    for col, default in [("id",""), ("name",""), ("price",0.0), ("active",True), ("note","")]:
+        if col not in df.columns:
+            df[col] = default
+
+    # Coerce types
+    df["name"] = df["name"].astype(str).str.strip()
+    df["price"] = pd.to_numeric(df["price"], errors="coerce").fillna(0.0).astype(float)
+    df["active"] = df["active"].astype(bool)
+
+    # Auto IDs where missing
+    needs_id = df["id"].astype(str).str.strip() == ""
+    if needs_id.any():
+        existing = set(df["id"].astype(str))
+        for i in df.index[needs_id]:
+            base = slugify(df.at[i, "name"]) or f"pkg{i}"
+            candidate = base.upper()[:16] or f"PKG{i}"
+            n = 1
+            while candidate in existing:
+                n += 1
+                candidate = f"{base.upper()[:12]}{n}"
+            df.at[i, "id"] = candidate
+            existing.add(candidate)
+
+    # Drop rows with empty name
+    df = df[df["name"].str.len() > 0].reset_index(drop=True)
+    return df
+
+@st.cache_data(show_spinner=False)
+def gs_read_packages() -> pd.DataFrame:
+    df = gs_read_df(PACKAGES_SHEET)
+    return ensure_packages_df(df)
+
+def gs_write_packages(df: pd.DataFrame):
+    df = ensure_packages_df(df)
+    gs_write_df(PACKAGES_SHEET, df)
+    try:
+        gs_read_df.clear()
+        gs_read_packages.clear()
+    except Exception:
+        st.cache_data.clear()
+
 # ---------- Clear / Archive helpers ----------
 from datetime import datetime
 import pandas as pd
@@ -393,9 +442,6 @@ def gs_set_setting(key: str, value: str):
         else:
             df = pd.concat([df, pd.DataFrame([[key, value]], columns=["key","value"])], ignore_index=True)
     gs_write_df(SETTINGS_SHEET, df)
-with st.expander("Packages & Pricing", expanded=True):
-    st.caption("Add, remove, or edit packages. Toggle **Show in kiosk** to hide a package without deleting it.")
-    df = gs_read_packages()
 
     edited = st.data_editor(
         df,
@@ -552,7 +598,69 @@ def settings_section():
                     st.success("Sheets OK (HEALTHCHECK=" + str(ping) + ") · Drive OK (file id " + str(fid) + ")")
                 except Exception as e:
                     st.error("Connection test failed. Verify Secrets, sharing on Sheet & Folder, and enabled APIs.")
-                    st.exception(e)
+                    st.exception(e)    # --- Packages & Pricing (NEW, moved inside settings) ---
+    with st.expander("Packages & Pricing", expanded=True):
+        st.caption("Add, remove, or edit packages. Toggle **Show in kiosk** to hide a package without deleting it.")
+        df = gs_read_packages()
+
+        edited = st.data_editor(
+            df,
+            num_rows="dynamic",
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "id":   st.column_config.TextColumn("ID (auto if blank)", help="Uppercase ID; leave blank to auto-generate"),
+                "name": st.column_config.TextColumn("Package Name"),
+                "price": st.column_config.NumberColumn("Price ($)", min_value=0.0, step=1.0, format="$%.2f"),
+                "active": st.column_config.CheckboxColumn("Show in kiosk"),
+                "note": st.column_config.TextColumn("Note (optional)"),
+            },
+        )
+
+        col1, col2 = st.columns([1,1])
+        with col1:
+            if st.button("Save packages", type="primary"):
+                if str(st.secrets.get("DEMO_MODE","0")).strip().lower() in {"1","true"}:
+                    st.warning("DEMO_MODE is ON. Turn it off to save to Google Sheets.")
+                else:
+                    gs_write_packages(edited)
+                    st.success("Packages saved.")
+                    st.rerun()
+        with col2:
+            st.info("Tip: Keep prices numeric. You can hide a package by unchecking **Show in kiosk**.")
+
+    # --- Data management (Danger Zone) (NEW, moved inside settings) ---
+    with st.expander("Data management (Danger Zone)", expanded=False):
+        chk_name = _checkins_sheet_name()
+        current_rows = gs_count_checkins()
+        st.write(f"**Sheet:** `{chk_name}`  ·  **Rows:** {current_rows}")
+
+        colA, colB = st.columns([3, 2])
+        with colA:
+            archive_first = st.checkbox("Archive to a new tab before clearing", value=True)
+            note = st.text_input("Optional archive note", value="", placeholder="e.g., End of Saturday session")
+            confirm = st.text_input('Type **CLEAR** to confirm', value="")
+        with colB:
+            st.info("This will remove all rows from the **Checkins** tab. "
+                    "Archiving creates a new tab with a timestamped copy.")
+
+        disabled = confirm.strip().upper() != "CLEAR" or (current_rows == 0)
+        btn_label = "Archive & Clear" if archive_first else "Clear now"
+        if st.button(btn_label, type="primary", disabled=disabled):
+            if str(st.secrets.get("DEMO_MODE", "0")).strip().lower() in {"1","true"}:
+                st.warning("DEMO_MODE is on. Turn it off to modify Google Sheets.")
+            else:
+                archived = ""
+                archived_rows = 0
+                if archive_first and current_rows > 0:
+                    archived, archived_rows = gs_archive_checkins(note=note)
+                    if archived_rows > 0:
+                        st.success(f"Archived {archived_rows} rows → new tab: **{archived}**")
+
+                gs_clear_checkins()
+                st.success("Checkins cleared.")
+                st.rerun()
+
 with st.expander("Data management (Danger Zone)", expanded=False):
     chk_name = _checkins_sheet_name()
     current_rows = gs_count_checkins()
