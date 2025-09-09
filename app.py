@@ -592,8 +592,6 @@ def settings_section():
         with col2:
             st.info("Tip: Keep prices numeric. You can hide a package by unchecking **Show in kiosk**.")
 
-    # --- Data management (Danger Zone) (NEW, moved inside settings) ---
-    with st.expander("Data management (Danger Zone)", expanded=False):
         chk_name = _checkins_sheet_name()
         current_rows = gs_count_checkins()
         st.write(f"**Sheet:** `{chk_name}`  ·  **Rows:** {current_rows}")
