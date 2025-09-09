@@ -279,7 +279,7 @@ def get_google():
             "paid","org_name","brand","brand_emails",
             "photo_filename","photo_drive_id","photo_link",
             # (optional) ensure new nor
-
+        ]
 
 @st.cache_data(ttl=20, show_spinner=False)
 def gs_read_df(sheet_name: str) -> pd.DataFrame:
