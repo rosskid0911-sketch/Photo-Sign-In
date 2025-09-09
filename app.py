@@ -277,7 +277,7 @@ def get_google():
             "ts","player_id","short_code","first_name","last_name","team","parent_email","parent_phone",
             "confirmed_email","confirmed_phone","jersey","confirmed_jersey","package","notes","release_accepted",
             "paid","org_name","brand","brand_emails",
-            "photo_filename","photo_drive_id","photo_link",
+            "photo_filename","photo_drive_id","photo_link",]
             # (optional) ensure new nor
         ]
 
