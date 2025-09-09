@@ -273,13 +273,33 @@ def get_google():
 
     # Ensure worksheets & headers
     sheets_to_ensure = [
-        ("Checkins", [
-            "ts","player_id","short_code","first_name","last_name","team","parent_email","parent_phone",
-            "confirmed_email","confirmed_phone","jersey","confirmed_jersey","package","notes","release_accepted",
-            "paid","org_name","brand","brand_emails",
-            "photo_filename","photo_drive_id","photo_link",]
-            # (optional) ensure new nor
-        ]
+        (
+            "Checkins",
+            [
+                "ts", "player_id", "short_code", "first_name", "last_name", "team", "parent_email", "parent_phone",
+                "confirmed_email", "confirmed_phone", "jersey", "confirmed_jersey", "package", "notes", "release_accepted",
+                "paid", "org_name", "brand", "brand_emails",
+                "photo_filename", "photo_drive_id", "photo_link",
+                # new normalized package columns:
+                "package_id", "package_name", "package_price",
+            ],
+        ),
+        ("Settings", ["key", "value"]),
+        ("Packages", ["id", "name", "price", "active", "note"]),
+    ]
+
+    for ws_name, cols in sheets_to_ensure:
+        try:
+            ws = sh.worksheet(ws_name)
+            values = ws.get_all_values()
+            if not values:
+                ws.update([cols])
+        except gspread.exceptions.WorksheetNotFound:
+            ws = sh.add_worksheet(title=ws_name, rows=1000, cols=max(20, len(cols)))
+            ws.update([cols])
+
+    return {"sh": sh, "drive": drive}
+
 
 @st.cache_data(ttl=20, show_spinner=False)
 def gs_read_df(sheet_name: str) -> pd.DataFrame:
