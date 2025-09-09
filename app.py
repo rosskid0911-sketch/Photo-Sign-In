@@ -724,11 +724,13 @@ def page_kiosk():
             "photo_filename": base_name,
             "photo_drive_id": fid,
             "photo_link": link,
-        }          save_row.update({
-    "package_id": selected_pkg_id,
-    "package_name": sel_row["name"] if active_pkgs is not None and not active_pkgs.empty and selected_pkg_id else "",
-    "package_price": selected_price,
-})
+            "package_id": selected_pkg_id,
+            "package_name": sel_row["name"] if active_pkgs is not None and not active_pkgs.empty and selected_pkg_id else "",
+            "package_price": selected_price,
+        }          
+   
+
+ save_row.update({})
 
 if active_pkgs.empty:
     st.warning("No active packages configured. Add packages in the Manager page.")
