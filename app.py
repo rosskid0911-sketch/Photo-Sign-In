@@ -631,14 +631,19 @@ def page_manager():
 def page_kiosk():
     st.markdown(BRAND_CSS, unsafe_allow_html=True)
 
-    # show logo from LOGO_URL or fall back to assets/logo.png
+    # Logo + title
     display_logo(width=220)
-
     org_name = gs_get_setting("ORG_NAME", "")
     title_suffix = f" — {org_name}" if org_name else ""
     st.title(f"{BRAND_NAME} — Photo Day Check-In{title_suffix}")
     st.caption("Please complete all fields and upload a photo. A staff member can assist if needed.")
 
+    # Load packages BEFORE the form so we can show price in the Paid toggle
+    try:
+        pkg_df = gs_read_packages()
+    except Exception:
+        pkg_df = pd.DataFrame()
+    active_pkgs = pkg_df[pkg_df.get("active", pd.Series([], dtype=bool))].reset_index(drop=True) if not pkg_df.empty else pd.DataFrame()
 
     with st.form("kiosk_form", clear_on_submit=True):
         colA, colB = st.columns(2)
@@ -647,30 +652,58 @@ def page_kiosk():
             last = st.text_input("Player Last Name", max_chars=50)
             team = st.text_input("Team / Division", max_chars=80)
             jersey = st.text_input("Jersey # (optional)", max_chars=10)
-            try:
-                paid = st.toggle(f"Paid (prepay or on-site) — ${selected_price:.2f}", value=False)
-            except Exception:
-                paid = st.checkbox("Paid (prepay or on-site)", value=False)
+
         with colB:
             parent_email = st.text_input("Parent Email (for final photo delivery)")
             parent_phone = st.text_input("Parent Phone")
-            pkg = st.selectbox("Photo Package (optional)", ["Not selected", "Basic", "Deluxe", "Team+Individual"])
+
+            # Dynamic Packages selector
+            if active_pkgs is not None and not active_pkgs.empty:
+                def _label(row):
+                    return f'{row["name"]} — ${float(row["price"]):.2f}'
+                options = active_pkgs["id"].tolist()
+                labels = {row["id"]: _label(row) for _, row in active_pkgs.iterrows()}
+                selected_pkg_id = st.selectbox(
+                    "Package",
+                    options=options,
+                    format_func=lambda pid: labels.get(pid, pid),
+                    index=0,
+                    help="Select your photo package",
+                )
+                sel_row = active_pkgs.loc[active_pkgs["id"] == selected_pkg_id].iloc[0]
+                selected_price = float(sel_row["price"])
+                st.caption(f"Price: **${selected_price:.2f}**")
+                package_name_for_row = str(sel_row["name"])
+            else:
+                st.warning("No active packages configured. Add packages in the Manager page.")
+                selected_pkg_id = ""
+                selected_price = 0.0
+                sel_row = None
+                package_name_for_row = "Not selected"
+
             notes = st.text_area("Notes (pose requests, etc.)")
             release = st.checkbox("I agree to the photo release/policy")
 
+        # Paid toggle (now that selected_price is defined)
+        paid = st.toggle(f"Paid (prepay or on-site) — ${selected_price:.2f}", value=False)
+
+        # Photo inputs
         st.markdown("**Photo (required)** — choose one:")
         cam = st.camera_input("Take photo with camera (preferred)")
         up = st.file_uploader("Or upload an image file", type=["jpg","jpeg","png","heic","webp"])
 
         submitted = st.form_submit_button("Complete Check-In", type="primary")
 
+    # Handle submission
     if submitted:
-        # Validate
+        # Validate required fields
         if not (first and last and team and parent_email and parent_phone and release):
             st.error("Please complete all required fields and agree to the release.")
+            payment_footer()
             return
         if not (cam or up):
             st.error("Photo is required. Please use the camera or upload a file.")
+            payment_footer()
             return
 
         # Prepare IDs
@@ -680,13 +713,13 @@ def page_kiosk():
         # Choose photo bytes & mimetype
         if cam is not None:
             photo_bytes = cam.getvalue()
-            mimetype = cam.type or "image/jpeg"
+            mimetype = (cam.type or "image/jpeg").lower()
             ext = ".jpg" if "jpeg" in mimetype else ".png"
         else:
             photo_bytes = up.getvalue()
-            mimetype = up.type or "image/jpeg"
+            mimetype = (up.type or "image/jpeg").lower()
             name = (up.name or "").lower()
-            if name.endswith((".jpg",".jpeg")): ext = ".jpg"
+            if name.endswith((".jpg", ".jpeg")): ext = ".jpg"
             elif name.endswith(".png"): ext = ".png"
             else: ext = ".jpg"
 
@@ -694,29 +727,34 @@ def page_kiosk():
         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         base_name = f"{slugify(org_name)}_{slugify(team)}_{slugify(last)}_{slugify(first)}_{scode}_{ts}{ext}"
 
+        # Upload photo
         try:
             fid, link = drive_upload_photo(base_name, photo_bytes, mimetype=mimetype)
         except Exception as e:
-            st.error("Photo upload to Google Drive failed. Please alert a staff member.")
+            st.error("Photo upload failed. Please alert a staff member.")
             st.exception(e)
+            payment_footer()
             return
 
+        # Build row for Sheets
         new_row = {
             "ts": datetime.utcnow().isoformat(),
             "player_id": pid,
             "short_code": scode,
-            "first_name": first,
-            "last_name": last,
-            "team": team,
-            "parent_email": parent_email,
-            "parent_phone": parent_phone,
-            "confirmed_email": parent_email,
-            "confirmed_phone": parent_phone,
-            "jersey": str(jersey),
-            "confirmed_jersey": str(jersey),
-            "package": pkg,
-            "notes": notes,
+            "first_name": first.strip(),
+            "last_name": last.strip(),
+            "team": team.strip(),
+            "parent_email": parent_email.strip(),
+            "parent_phone": parent_phone.strip(),
+            "confirmed_email": parent_email.strip(),
+            "confirmed_phone": parent_phone.strip(),
+            "jersey": str(jersey or "").strip(),
+            "confirmed_jersey": str(jersey or "").strip(),
+            # legacy "package" column (human-friendly)
+            "package": package_name_for_row,
+            "notes": notes.strip(),
             "release_accepted": bool(release),
+            # keep your original boolean-as-text if your sheet expects it:
             "paid": "TRUE" if paid else "FALSE",
             "org_name": org_name,
             "brand": BRAND_NAME,
@@ -724,43 +762,20 @@ def page_kiosk():
             "photo_filename": base_name,
             "photo_drive_id": fid,
             "photo_link": link,
+            # New normalized package fields
             "package_id": selected_pkg_id,
-            "package_name": sel_row["name"] if active_pkgs is not None and not active_pkgs.empty and selected_pkg_id else "",
-            "package_price": selected_price,
-        }          
-   
+            "package_name": package_name_for_row,
+            "package_price": float(selected_price),
+        }
 
- save_row.update({})
+        # Write to Sheets (use your existing insert/append function)
+        sb_insert_checkin(new_row)
 
-if active_pkgs.empty:
-    st.warning("No active packages configured. Add packages in the Manager page.")
-    selected_pkg_id = ""
-    selected_price = 0.0
-else:
-    # Make a mapping for nice labels
-    def pkg_label(row):
-        return f'{row["name"]} — ${row["price"]:.2f}'
-
-    options = active_pkgs["id"].tolist()
-    labels = {row["id"]: pkg_label(row) for _, row in active_pkgs.iterrows()}
-
-    selected_pkg_id = st.selectbox(
-        "Package",
-        options=options,
-        format_func=lambda pid: labels.get(pid, pid),
-        index=0,
-        help="Select your photo package",
-    )
-    sel_row = active_pkgs.loc[active_pkgs["id"] == selected_pkg_id].iloc[0]
-    selected_price = float(sel_row["price"])
-    st.caption(f"Price: **${selected_price:.2f}**")
-
-sb_insert_checkin(new_row)
         st.success("Checked in and photo uploaded! Thank you.")
-payment_footer()
-# Load active packages
-pkg_df = gs_read_packages()
-active_pkgs = pkg_df[pkg_df["active"]].reset_index(drop=True)
+        # (form is clear_on_submit=True, so fields will reset)
+
+    # Show payment options at the bottom of the page
+    payment_footer()
 
 # ----------------------------- Router ----------------------------------------
 def main():
