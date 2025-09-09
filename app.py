@@ -314,6 +314,62 @@ def gs_write_df(sheet_name: str, df: pd.DataFrame):
     data = [list(df2.columns)] + df2.astype(str).values.tolist()
     ws.clear()
     ws.update(data)
+# ---------- Clear / Archive helpers ----------
+from datetime import datetime
+import pandas as pd
+import streamlit as st
+
+def _checkins_sheet_name() -> str:
+    # Use existing constant if your app defines it; otherwise default to "Checkins"
+    return globals().get("CHECKINS_SHEET", "Checkins")
+
+def gs_count_checkins() -> int:
+    name = _checkins_sheet_name()
+    df = gs_read_df(name)
+    return 0 if df.empty else len(df)
+
+def gs_archive_checkins(note: str = "") -> tuple[str, int]:
+    """Copy current Checkins tab to a new archive tab, return (archive_name, rows_archived)."""
+    name = _checkins_sheet_name()
+    df = gs_read_df(name)
+    rows = 0 if df.empty else len(df)
+    if rows == 0:
+        return "", 0
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    archive_name = f"{name}_Archive_{stamp}"
+    if note:
+        # Add an optional note column to the archive
+        df = df.copy()
+        df["__archive_note__"] = note
+    gs_write_df(archive_name, df)
+    try:
+        gs_read_df.clear()
+    except Exception:
+        st.cache_data.clear()
+    return archive_name, rows
+
+def gs_clear_checkins():
+    """Clear all rows from Checkins, preserving columns/header."""
+    name = _checkins_sheet_name()
+    df = gs_read_df(name)
+    if df.empty:
+        # Nothing to clear; ensure the tab at least exists
+        gs_write_df(name, pd.DataFrame())
+    else:
+        empty = df.iloc[0:0]  # preserve the same columns
+        gs_write_df(name, empty)
+    try:
+        gs_read_df.clear()
+    except Exception:
+        st.cache_data.clear()
+# --- Packages ---
+PACKAGES_SHEET = "Packages"
+DEFAULT_PACKAGES = [
+    {"id": "BASIC",  "name": "Basic (1 pose)",     "price": 25.00, "active": True,  "note": ""},
+    {"id": "PLUS",   "name": "Plus (2 poses)",     "price": 40.00, "active": True,  "note": ""},
+    {"id": "DELUXE", "name": "Deluxe (3 poses)",   "price": 55.00, "active": True,  "note": ""},
+    {"id": "TEAM",   "name": "Team Photo Add-on",  "price": 10.00, "active": False, "note": ""},
+]
 
 # Settings KV
 SETTINGS_SHEET = "Settings"
@@ -337,6 +393,35 @@ def gs_set_setting(key: str, value: str):
         else:
             df = pd.concat([df, pd.DataFrame([[key, value]], columns=["key","value"])], ignore_index=True)
     gs_write_df(SETTINGS_SHEET, df)
+with st.expander("Packages & Pricing", expanded=True):
+    st.caption("Add, remove, or edit packages. Toggle **Show in kiosk** to hide a package without deleting it.")
+    df = gs_read_packages()
+
+    edited = st.data_editor(
+        df,
+        num_rows="dynamic",
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "id":   st.column_config.TextColumn("ID (auto if blank)", help="Uppercase ID; leave blank to auto-generate"),
+            "name": st.column_config.TextColumn("Package Name"),
+            "price": st.column_config.NumberColumn("Price ($)", min_value=0.0, step=1.0, format="$%.2f"),
+            "active": st.column_config.CheckboxColumn("Show in kiosk"),
+            "note": st.column_config.TextColumn("Note (optional)"),
+        },
+    )
+
+    col1, col2 = st.columns([1,1])
+    with col1:
+        if st.button("Save packages", type="primary"):
+            if str(st.secrets.get("DEMO_MODE","0")).strip() in {"1","true","True"}:
+                st.warning("DEMO_MODE is ON. Turn it off to save to Google Sheets.")
+            else:
+                gs_write_packages(edited)
+                st.success("Packages saved.")
+                st.rerun()
+    with col2:
+        st.info("Tip: Keep prices numeric. You can hide a package by unchecking **Show in kiosk**.")
 
 # Check-ins
 def sb_insert_checkin(row: dict):
@@ -468,6 +553,36 @@ def settings_section():
                 except Exception as e:
                     st.error("Connection test failed. Verify Secrets, sharing on Sheet & Folder, and enabled APIs.")
                     st.exception(e)
+with st.expander("Data management (Danger Zone)", expanded=False):
+    chk_name = _checkins_sheet_name()
+    current_rows = gs_count_checkins()
+    st.write(f"**Sheet:** `{chk_name}`  ·  **Rows:** {current_rows}")
+
+    colA, colB = st.columns([3, 2])
+    with colA:
+        archive_first = st.checkbox("Archive to a new tab before clearing", value=True)
+        note = st.text_input("Optional archive note", value="", placeholder="e.g., End of Saturday session")
+        confirm = st.text_input('Type **CLEAR** to confirm', value="")
+    with colB:
+        st.info("This will remove all rows from the **Checkins** tab. "
+                "Archiving creates a new tab with a timestamped copy.")
+
+    disabled = confirm.strip().upper() != "CLEAR" or (current_rows == 0)
+    btn_label = "Archive & Clear" if archive_first else "Clear now"
+    if st.button(btn_label, type="primary", disabled=disabled):
+        if str(st.secrets.get("DEMO_MODE", "0")).strip() in {"1","true","True"}:
+            st.warning("DEMO_MODE is on. Turn it off to modify Google Sheets.")
+        else:
+            archived = ""
+            archived_rows = 0
+            if archive_first and current_rows > 0:
+                archived, archived_rows = gs_archive_checkins(note=note)
+                if archived_rows > 0:
+                    st.success(f"Archived {archived_rows} rows → new tab: **{archived}**")
+
+            gs_clear_checkins()
+            st.success("Checkins cleared.")
+            st.rerun()
 
 def page_manager():
     st.markdown(BRAND_CSS, unsafe_allow_html=True)
@@ -533,7 +648,7 @@ def page_kiosk():
             team = st.text_input("Team / Division", max_chars=80)
             jersey = st.text_input("Jersey # (optional)", max_chars=10)
             try:
-                paid = st.toggle("Paid (prepay or on-site)", value=False)
+                paid = st.toggle(f"Paid (prepay or on-site) — ${selected_price:.2f}", value=False)
             except Exception:
                 paid = st.checkbox("Paid (prepay or on-site)", value=False)
         with colB:
@@ -609,10 +724,42 @@ def page_kiosk():
             "photo_filename": base_name,
             "photo_drive_id": fid,
             "photo_link": link,
-        }
-        sb_insert_checkin(new_row)
+        }          save_row.update({
+    "package_id": selected_pkg_id,
+    "package_name": sel_row["name"] if active_pkgs is not None and not active_pkgs.empty and selected_pkg_id else "",
+    "package_price": selected_price,
+})
+
+if active_pkgs.empty:
+    st.warning("No active packages configured. Add packages in the Manager page.")
+    selected_pkg_id = ""
+    selected_price = 0.0
+else:
+    # Make a mapping for nice labels
+    def pkg_label(row):
+        return f'{row["name"]} — ${row["price"]:.2f}'
+
+    options = active_pkgs["id"].tolist()
+    labels = {row["id"]: pkg_label(row) for _, row in active_pkgs.iterrows()}
+
+    selected_pkg_id = st.selectbox(
+        "Package",
+        options=options,
+        format_func=lambda pid: labels.get(pid, pid),
+        index=0,
+        help="Select your photo package",
+    )
+    sel_row = active_pkgs.loc[active_pkgs["id"] == selected_pkg_id].iloc[0]
+    selected_price = float(sel_row["price"])
+    st.caption(f"Price: **${selected_price:.2f}**")
+
+sb_insert_checkin(new_row)
         st.success("Checked in and photo uploaded! Thank you.")
 payment_footer()
+# Load active packages
+pkg_df = gs_read_packages()
+active_pkgs = pkg_df[pkg_df["active"]].reset_index(drop=True)
+
 # ----------------------------- Router ----------------------------------------
 def main():
     mode = get_mode_param()
