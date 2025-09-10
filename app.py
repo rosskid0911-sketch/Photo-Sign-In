@@ -701,8 +701,12 @@ def page_kiosk():
     try:
         pkg_df = gs_read_packages()
     except Exception:
-        pkg_df = pd.DataFrame()
-    active_pkgs = pkg_df[pkg_df.get("active", pd.Series([], dtype=bool))].reset_index(drop=True) if not pkg_df.empty else pd.DataFrame()
+        pkg_df = gs_read_packages()
+if not pkg_df.empty:
+    mask = pkg_df["active"].map(as_bool)
+    active_pkgs = pkg_df[mask].reset_index(drop=True)
+else:
+    active_pkgs = pd.DataFrame()
 
     with st.form("kiosk_form", clear_on_submit=True):
         colA, colB = st.columns(2)
