@@ -567,14 +567,16 @@ def settings_section():
                     gs_set_setting("HEALTHCHECK", now)
                     ping = gs_get_setting("HEALTHCHECK", "")
                     dummy_bytes = b"healthcheck"
-                    fid, link = drive_upload_photo("healthcheck_" + now + ".txt", dummy_bytes, mimetype="text/plain")
+                    fid, _ = drive_upload_photo("healthcheck_" + now + ".txt", dummy_bytes, mimetype="text/plain")
                     st.success("Sheets OK (HEALTHCHECK=" + str(ping) + ") · Drive OK (file id " + str(fid) + ")")
                 except Exception as e:
                     st.error("Connection test failed. Verify Secrets, sharing on Sheet & Folder, and enabled APIs.")
-                    st.exception(e)    # --- Packages & Pricing (NEW, moved inside settings) ---
+                    st.exception(e)
+
+    # --- Packages & Pricing ---
     with st.expander("Packages & Pricing", expanded=True):
-        st.caption("Add, remove, or edit packages. Toggle **Show in kiosk** to hide a package without deleting it.")
         df = gs_read_packages()
+        st.caption("Add, remove, or edit packages. Toggle **Show in kiosk** to hide a package without deleting it.")
 
         edited = st.data_editor(
             df,
@@ -590,8 +592,8 @@ def settings_section():
             },
         )
 
-        col1, col2 = st.columns([1,1])
-        with col1:
+        c1, c2 = st.columns([1,1])
+        with c1:
             if st.button("Save packages", type="primary"):
                 if str(st.secrets.get("DEMO_MODE","0")).strip().lower() in {"1","true"}:
                     st.warning("DEMO_MODE is ON. Turn it off to save to Google Sheets.")
@@ -599,10 +601,12 @@ def settings_section():
                     gs_write_packages(edited)
                     st.success("Packages saved.")
                     st.rerun()
-        with col2:
+        with c2:
             st.info("Tip: Keep prices numeric. You can hide a package by unchecking **Show in kiosk**.")
 
-        chk_name = _checkins_sheet_name()
+    # --- Data management (Danger Zone) ---
+    with st.expander("Data management (Danger Zone)", expanded=False):
+        chk_name = globals().get("CHECKINS_SHEET", "Checkins")
         current_rows = gs_count_checkins()
         st.write(f"**Sheet:** `{chk_name}`  ·  **Rows:** {current_rows}")
 
@@ -612,8 +616,7 @@ def settings_section():
             note = st.text_input("Optional archive note", value="", placeholder="e.g., End of Saturday session")
             confirm = st.text_input('Type **CLEAR** to confirm', value="")
         with colB:
-            st.info("This will remove all rows from the **Checkins** tab. "
-                    "Archiving creates a new tab with a timestamped copy.")
+            st.info("This will remove all rows from the **Checkins** tab. Archiving creates a new tab with a timestamped copy.")
 
         disabled = confirm.strip().upper() != "CLEAR" or (current_rows == 0)
         btn_label = "Archive & Clear" if archive_first else "Clear now"
@@ -632,11 +635,14 @@ def settings_section():
                 st.success("Checkins cleared.")
                 st.rerun()
 
-
 def page_manager():
     st.markdown(BRAND_CSS, unsafe_allow_html=True)
     st.title(f"📸 {BRAND_NAME} — Manager")
-    st.markdown(f"<div class='brand-hero'><strong>Delivery CC:</strong> {BRAND_EMAILS} <span class='badge'>BRAND</span></div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div class='brand-hero'><strong>Delivery CC:</strong> {BRAND_EMAILS} "
+        "<span class='badge'>BRAND</span></div>",
+        unsafe_allow_html=True,
+    )
 
     # PIN gate
     if "auth" not in st.session_state:
@@ -658,16 +664,13 @@ def page_manager():
     st.caption("Paste your deployed app URL below and we'll generate the kiosk link + QR.")
     base_url = st.text_input("Your app URL", placeholder="https://your-app.streamlit.app")
     if base_url:
-        base_url = base_url.strip()
-        if "?" in base_url:
-            base_url = base_url.split("?")[0]
+        base_url = base_url.strip().split("?")[0]
         kiosk_link = base_url.rstrip("/") + "/?mode=kiosk"
         st.write("**Kiosk link:**")
         st.code(kiosk_link)
         img = make_qr_image(kiosk_link, box_size=8)
         st.image(img, caption="Scan to open kiosk", width=240)
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
+        buf = io.BytesIO(); img.save(buf, format="PNG")
         st.download_button("Download QR (PNG)", data=buf.getvalue(), file_name="kiosk_qr.png", type="primary")
 
     checkins = sb_load_checkins()
@@ -680,7 +683,6 @@ def page_manager():
 def page_kiosk():
     st.markdown(BRAND_CSS, unsafe_allow_html=True)
 
-    # Logo + title
     display_logo(width=220)
     org_name = gs_get_setting("ORG_NAME", "")
     title_suffix = f" — {org_name}" if org_name else ""
@@ -691,12 +693,17 @@ def page_kiosk():
     try:
         pkg_df = gs_read_packages()
     except Exception:
-        pkg_df = gs_read_packages()
-if not pkg_df.empty:
-    mask = pkg_df["active"].map(as_bool)
-    active_pkgs = pkg_df[mask].reset_index(drop=True)
-else:
-    active_pkgs = pd.DataFrame()
+        pkg_df = pd.DataFrame()
+    if not pkg_df.empty:
+        from math import isnan
+        # robust boolean parse if sheet stored "TRUE"/"FALSE"
+        def as_bool(v): 
+            s = str(v).strip().lower()
+            return s in {"true","1","yes","y","t"} if not isinstance(v, bool) else v
+        mask = pkg_df["active"].map(as_bool)
+        active_pkgs = pkg_df[mask].reset_index(drop=True)
+    else:
+        active_pkgs = pd.DataFrame()
 
     with st.form("kiosk_form", clear_on_submit=True):
         colA, colB = st.columns(2)
@@ -710,7 +717,6 @@ else:
             parent_email = st.text_input("Parent Email (for final photo delivery)")
             parent_phone = st.text_input("Parent Phone")
 
-            # Dynamic Packages selector
             if active_pkgs is not None and not active_pkgs.empty:
                 def _label(row):
                     return f'{row["name"]} — ${float(row["price"]):.2f}'
@@ -737,19 +743,15 @@ else:
             notes = st.text_area("Notes (pose requests, etc.)")
             release = st.checkbox("I agree to the photo release/policy")
 
-        # Paid toggle (now that selected_price is defined)
         paid = st.toggle(f"Paid (prepay or on-site) — ${selected_price:.2f}", value=False)
 
-        # Photo inputs
         st.markdown("**Photo (required)** — choose one:")
         cam = st.camera_input("Take photo with camera (preferred)")
         up = st.file_uploader("Or upload an image file", type=["jpg","jpeg","png","heic","webp"])
 
         submitted = st.form_submit_button("Complete Check-In", type="primary")
 
-    # Handle submission
     if submitted:
-        # Validate required fields
         if not (first and last and team and parent_email and parent_phone and release):
             st.error("Please complete all required fields and agree to the release.")
             payment_footer()
@@ -759,11 +761,9 @@ else:
             payment_footer()
             return
 
-        # Prepare IDs
         pid = gen_player_id(first, last, team)
         scode = short_code(pid)
 
-        # Choose photo bytes & mimetype
         if cam is not None:
             photo_bytes = cam.getvalue()
             mimetype = (cam.type or "image/jpeg").lower()
@@ -776,11 +776,9 @@ else:
             elif name.endswith(".png"): ext = ".png"
             else: ext = ".jpg"
 
-        # Compose filename
         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         base_name = f"{slugify(org_name)}_{slugify(team)}_{slugify(last)}_{slugify(first)}_{scode}_{ts}{ext}"
 
-        # Upload photo
         try:
             fid, link = drive_upload_photo(base_name, photo_bytes, mimetype=mimetype)
         except Exception as e:
@@ -789,7 +787,6 @@ else:
             payment_footer()
             return
 
-        # Build row for Sheets
         new_row = {
             "ts": datetime.utcnow().isoformat(),
             "player_id": pid,
@@ -803,11 +800,9 @@ else:
             "confirmed_phone": parent_phone.strip(),
             "jersey": str(jersey or "").strip(),
             "confirmed_jersey": str(jersey or "").strip(),
-            # legacy "package" column (human-friendly)
             "package": package_name_for_row,
             "notes": notes.strip(),
             "release_accepted": bool(release),
-            # keep your original boolean-as-text if your sheet expects it:
             "paid": "TRUE" if paid else "FALSE",
             "org_name": org_name,
             "brand": BRAND_NAME,
@@ -815,19 +810,13 @@ else:
             "photo_filename": base_name,
             "photo_drive_id": fid,
             "photo_link": link,
-            # New normalized package fields
             "package_id": selected_pkg_id,
             "package_name": package_name_for_row,
             "package_price": float(selected_price),
         }
-
-        # Write to Sheets (use your existing insert/append function)
         sb_insert_checkin(new_row)
-
         st.success("Checked in and photo uploaded! Thank you.")
-        # (form is clear_on_submit=True, so fields will reset)
 
-    # Show payment options at the bottom of the page
     payment_footer()
 
 # ----------------------------- Router ----------------------------------------
