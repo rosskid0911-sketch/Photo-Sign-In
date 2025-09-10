@@ -442,16 +442,6 @@ def gs_get_setting(key: str, default: str = "") -> str:
         return str(hit.iloc[0]["value"]) if pd.notna(hit.iloc[0]["value"]) else default
     return default
 
-def gs_set_setting(key: str, value: str):
-    df = gs_read_df(SETTINGS_SHEET)
-    if df.empty:
-        df = pd.DataFrame([[key, value]], columns=["key","value"])
-    else:
-        if key in df["key"].values:
-            df.loc[df["key"] == key, "value"] = value
-        else:
-            df = pd.concat([df, pd.DataFrame([[key, value]], columns=["key","value"])], ignore_index=True)
-
 # Check-ins
 def sb_insert_checkin(row: dict):
     existing = gs_read_df("Checkins")
