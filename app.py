@@ -714,6 +714,7 @@ def page_manager():
 def page_kiosk():
     st.markdown(BRAND_CSS, unsafe_allow_html=True)
 
+    # Header
     display_logo(width=220)
     org_name = gs_get_setting("ORG_NAME", "")
     title_suffix = f" — {org_name}" if org_name else ""
@@ -725,80 +726,85 @@ def page_kiosk():
         pkg_df = gs_read_packages()
     except Exception:
         pkg_df = pd.DataFrame()
-    if not pkg_df.empty:
-        from math import isnan
-        # robust boolean parse if sheet stored "TRUE"/"FALSE"
-        def as_bool(v): 
-            s = str(v).strip().lower()
-            return s in {"true","1","yes","y","t"} if not isinstance(v, bool) else v
-        mask = pkg_df["active"].map(as_bool)
+
+    def _as_bool(v):
+        if isinstance(v, bool):
+            return v
+        return str(v).strip().lower() in {"true", "1", "yes", "y", "t"}
+
+    if not pkg_df.empty and "active" in pkg_df.columns:
+        mask = pkg_df["active"].map(_as_bool)
         active_pkgs = pkg_df[mask].reset_index(drop=True)
     else:
         active_pkgs = pd.DataFrame()
 
+    # Defaults so we can render the form even if no packages exist
+    selected_pkg_id = ""
+    selected_price = 0.0
+    package_name_for_row = "Not selected"
+    sel_row = None
+
+    # ------------------- FORM (be careful: every line is indented 4 spaces) -------------------
     with st.form("kiosk_form", clear_on_submit=True):
-    colA, colB = st.columns(2)
+        colA, colB = st.columns(2)
 
-    with colA:
-        first = st.text_input("Player First Name", max_chars=50)
-        last = st.text_input("Player Last Name", max_chars=50)
-        team = st.text_input("Team / Division", max_chars=80)
-        jersey = st.text_input("Jersey # (optional)", max_chars=10)
+        with colA:
+            first = st.text_input("Player First Name", max_chars=50)
+            last = st.text_input("Player Last Name", max_chars=50)
+            team = st.text_input("Team / Division", max_chars=80)
+            jersey = st.text_input("Jersey # (optional)", max_chars=10)
 
-    with colB:
-        parent_email = st.text_input("Parent Email (for final photo delivery)")
-        parent_phone = st.text_input("Parent Phone")
+        with colB:
+            parent_email = st.text_input("Parent Email (for final photo delivery)")
+            parent_phone = st.text_input("Parent Phone")
 
-        # Dynamic Packages selector
-        if active_pkgs is not None and not active_pkgs.empty:
-            def _label(row):
-                return f'{row["name"]} — ${float(row["price"]):.2f}'
-            options = active_pkgs["id"].tolist()
-            labels = {row["id"]: _label(row) for _, row in active_pkgs.iterrows()}
-            selected_pkg_id = st.selectbox(
-                "Package",
-                options=options,
-                format_func=lambda pid: labels.get(pid, pid),
-                index=0,
-                help="Select your photo package",
+            # Dynamic Packages selector
+            if not active_pkgs.empty:
+                def _label(row):
+                    return f'{row["name"]} — ${float(row["price"]):.2f}'
+                options = active_pkgs["id"].tolist()
+                labels = {row["id"]: _label(row) for _, row in active_pkgs.iterrows()}
+                selected_pkg_id = st.selectbox(
+                    "Package",
+                    options=options,
+                    format_func=lambda pid: labels.get(pid, pid),
+                    index=0,
+                    help="Select your photo package",
+                )
+                sel_row = active_pkgs.loc[active_pkgs["id"] == selected_pkg_id].iloc[0]
+                selected_price = float(sel_row["price"])
+                package_name_for_row = str(sel_row["name"])
+                st.caption(f"Price: **${selected_price:.2f}**")
+            else:
+                st.warning("No active packages configured. Add packages in the Manager page.")
+
+            # Policy view + consent
+            notes = st.text_area("Notes (pose requests, etc.)")
+            policy_url  = gs_get_setting("POLICY_URL", "").strip()
+            policy_text = gs_get_setting("POLICY_TEXT", "").strip() or DEFAULT_POLICY_TEXT
+            with st.expander("View photo release / policy (tap to read)"):
+                if policy_url:
+                    st.markdown(f"[Open full policy in a new tab]({policy_url})")
+                st.markdown(policy_text)
+                st.checkbox("I have read the policy", key="read_policy")
+            release = st.checkbox(
+                "I agree to the photo release/policy",
+                disabled=not st.session_state.get("read_policy", False),
             )
-            sel_row = active_pkgs.loc[active_pkgs["id"] == selected_pkg_id].iloc[0]
-            selected_price = float(sel_row["price"])
-            st.caption(f"Price: **${selected_price:.2f}**")
-            package_name_for_row = str(sel_row["name"])
-        else:
-            st.warning("No active packages configured. Add packages in the Manager page.")
-            selected_pkg_id = ""
-            selected_price = 0.0
-            sel_row = None
-            package_name_for_row = "Not selected"
 
-        # --- Policy view + consent (enabled after reading) ---
-        notes = st.text_area("Notes (pose requests, etc.)")
-        policy_url  = gs_get_setting("POLICY_URL", "").strip()
-        policy_text = gs_get_setting("POLICY_TEXT", "").strip() or DEFAULT_POLICY_TEXT
-        with st.expander("View photo release / policy (tap to read)"):
-            if policy_url:
-                st.markdown(f"[Open full policy in a new tab]({policy_url})")
-            st.markdown(policy_text)
-            read_policy = st.checkbox("I have read the policy", key="read_policy")
-        release = st.checkbox(
-            "I agree to the photo release/policy",
-            disabled=not st.session_state.get("read_policy", False),
-        )
+            # Paid toggle in same column for consistent layout
+            paid = st.toggle(f"Paid (prepay or on-site) — ${selected_price:.2f}", value=False)
 
-        # Keep the Paid toggle in the same column for consistent layout
-        paid = st.toggle(f"Paid (prepay or on-site) — ${selected_price:.2f}", value=False)
+        # Photo inputs (form level)
+        st.markdown("**Photo (required)** — choose one:")
+        cam = st.camera_input("Take photo with camera (preferred)")
+        up = st.file_uploader("Or upload an image file", type=["jpg", "jpeg", "png", "heic", "webp"])
 
-    # ---- Back at the form level (no extra indent) ----
-    st.markdown("**Photo (required)** — choose one:")
-    cam = st.camera_input("Take photo with camera (preferred)")
-    up = st.file_uploader("Or upload an image file", type=["jpg","jpeg","png","heic","webp"])
-
-    submitted = st.form_submit_button("Complete Check-In", type="primary")
-
+        submitted = st.form_submit_button("Complete Check-In", type="primary")
+    # ------------------- /FORM -------------------
 
     if submitted:
+        # Validate required fields
         if not (first and last and team and parent_email and parent_phone and release):
             st.error("Please complete all required fields and agree to the release.")
             payment_footer()
@@ -808,9 +814,11 @@ def page_kiosk():
             payment_footer()
             return
 
+        # IDs
         pid = gen_player_id(first, last, team)
         scode = short_code(pid)
 
+        # Choose photo bytes & mimetype
         if cam is not None:
             photo_bytes = cam.getvalue()
             mimetype = (cam.type or "image/jpeg").lower()
@@ -819,13 +827,18 @@ def page_kiosk():
             photo_bytes = up.getvalue()
             mimetype = (up.type or "image/jpeg").lower()
             name = (up.name or "").lower()
-            if name.endswith((".jpg", ".jpeg")): ext = ".jpg"
-            elif name.endswith(".png"): ext = ".png"
-            else: ext = ".jpg"
+            if name.endswith((".jpg", ".jpeg")):
+                ext = ".jpg"
+            elif name.endswith(".png"):
+                ext = ".png"
+            else:
+                ext = ".jpg"
 
+        # Filename
         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         base_name = f"{slugify(org_name)}_{slugify(team)}_{slugify(last)}_{slugify(first)}_{scode}_{ts}{ext}"
 
+        # Upload
         try:
             fid, link = drive_upload_photo(base_name, photo_bytes, mimetype=mimetype)
         except Exception as e:
@@ -834,6 +847,7 @@ def page_kiosk():
             payment_footer()
             return
 
+        # Row for Sheets
         new_row = {
             "ts": datetime.utcnow().isoformat(),
             "player_id": pid,
@@ -849,7 +863,7 @@ def page_kiosk():
             "confirmed_jersey": str(jersey or "").strip(),
             "package": package_name_for_row,
             "notes": notes.strip(),
-            "release_accepted": bool(release),
+            "release_accepted": True,
             "paid": "TRUE" if paid else "FALSE",
             "org_name": org_name,
             "brand": BRAND_NAME,
@@ -864,6 +878,7 @@ def page_kiosk():
         sb_insert_checkin(new_row)
         st.success("Checked in and photo uploaded! Thank you.")
 
+    # Payment options at bottom
     payment_footer()
 
 # ----------------------------- Router ----------------------------------------
