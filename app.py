@@ -326,11 +326,43 @@ def gs_write_df(sheet_name: str, df: pd.DataFrame):
     if DEMO_MODE:
         return
     sh = get_google()["sh"]
-    ws = sh.worksheet(sheet_name)
+
+    # Google Sheets tab titles max length ~100 chars; trim just in case
+    if len(sheet_name) > 100:
+        sheet_name = sheet_name[:100]
+
     df2 = df.copy().where(pd.notnull(df), "")
-    data = [list(df2.columns)] + df2.astype(str).values.tolist()
+
+    # Ensure we have at least a header row
+    if df2 is None or df2.empty:
+        # If caller passed an empty DataFrame with columns (like df.iloc[0:0]), keep those columns
+        header = list(getattr(df2, "columns", []))
+        if not header:
+            header = ["col1"]  # fallback, should rarely happen
+        data = [header]
+    else:
+        data = [list(df2.columns)] + df2.astype(str).values.tolist()
+
+    # Get or create the worksheet
+    try:
+        ws = sh.worksheet(sheet_name)
+    except gspread.exceptions.WorksheetNotFound:
+        rows = max(2, len(data))              # header + at least one row
+        cols = max(20, len(data[0]))          # at least 20 cols for comfort
+        ws = sh.add_worksheet(title=sheet_name, rows=rows, cols=cols)
+
+    # Write data
     ws.clear()
     ws.update(data)
+
+    # Bust caches so readers see the latest immediately
+    try:
+        gs_read_df.clear()
+        gs_read_packages.clear()
+    except Exception:
+        pass
+    st.cache_data.clear()
+
   # --- Packages helpers (NEW) ---
 def ensure_packages_df(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize columns & types; seed defaults if empty."""
