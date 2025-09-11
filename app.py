@@ -60,6 +60,14 @@ BRAND_PRIMARY = "#111827"
 BRAND_ACCENT = "#f59e0b"
 BRAND_EMAILS = "trossiter@photographbytr.com; photographbytr@gmail.com; rosskid0911@gmail.com"
 
+# Default policy text shown if none saved in Settings
+DEFAULT_POLICY_TEXT = (
+    "By participating in photo day, I authorize Photograph BY TR, LLC to make, use, "
+    "and share photographs of my child for the purpose of creating and delivering the "
+    "purchased products. I acknowledge that team/league usage may include social media "
+    "and league communications. I understand I can contact the studio with any concerns."
+)
+
 # ----------------------------- Branding CSS ----------------------------------
 # NOTE: This is an f-string; all literal CSS braces must be doubled {{ }}
 BRAND_CSS = f"""
@@ -441,6 +449,29 @@ def gs_get_setting(key: str, default: str = "") -> str:
     if not hit.empty:
         return str(hit.iloc[0]["value"]) if pd.notna(hit.iloc[0]["value"]) else default
     return default
+   
+  # --- Photo Release / Policy editor ---
+    with st.expander("Photo Release / Policy", expanded=False):
+        current_text = gs_get_setting("POLICY_TEXT", "")
+        current_url  = gs_get_setting("POLICY_URL", "")
+
+        policy_text = st.text_area(
+            "Policy text (shown in kiosk)",
+            value=(current_text or DEFAULT_POLICY_TEXT),
+            height=240,
+            help="This appears in the kiosk under 'View policy'.",
+        )
+        policy_url = st.text_input(
+            "Policy URL (optional)",
+            value=current_url,
+            placeholder="https://... (PDF or public web page)",
+            help="If provided, the kiosk shows an 'Open full policy' link (opens in a new tab).",
+        )
+
+        if st.button("Save policy"):
+            gs_set_setting("POLICY_TEXT", policy_text)
+            gs_set_setting("POLICY_URL", policy_url)
+            st.success("Policy saved.")
 
 # Check-ins
 def sb_insert_checkin(row: dict):
@@ -741,7 +772,24 @@ def page_kiosk():
                 package_name_for_row = "Not selected"
 
             notes = st.text_area("Notes (pose requests, etc.)")
-            release = st.checkbox("I agree to the photo release/policy")
+
+# Load policy content from Settings (fallback to default text)
+policy_url  = gs_get_setting("POLICY_URL", "").strip()
+policy_text = gs_get_setting("POLICY_TEXT", "").strip() or DEFAULT_POLICY_TEXT
+
+# Step 1: View policy (inline expander)
+with st.expander("View photo release / policy (tap to read)"):
+    if policy_url:
+        st.markdown(f"[Open full policy in a new tab]({policy_url})", help="Opens the full document.")
+    st.markdown(policy_text)
+    read_policy = st.checkbox("I have read the policy", key="read_policy")
+
+# Step 2: Agree is disabled until 'read' is checked
+release = st.checkbox(
+    "I agree to the photo release/policy",
+    disabled=not st.session_state.get("read_policy", False),
+)
+
 
         paid = st.toggle(f"Paid (prepay or on-site) — ${selected_price:.2f}", value=False)
 
