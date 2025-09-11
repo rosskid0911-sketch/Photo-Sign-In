@@ -737,67 +737,66 @@ def page_kiosk():
         active_pkgs = pd.DataFrame()
 
     with st.form("kiosk_form", clear_on_submit=True):
-        colA, colB = st.columns(2)
-        with colA:
-            first = st.text_input("Player First Name", max_chars=50)
-            last = st.text_input("Player Last Name", max_chars=50)
-            team = st.text_input("Team / Division", max_chars=80)
-            jersey = st.text_input("Jersey # (optional)", max_chars=10)
+    colA, colB = st.columns(2)
 
-        with colB:
-            parent_email = st.text_input("Parent Email (for final photo delivery)")
-            parent_phone = st.text_input("Parent Phone")
+    with colA:
+        first = st.text_input("Player First Name", max_chars=50)
+        last = st.text_input("Player Last Name", max_chars=50)
+        team = st.text_input("Team / Division", max_chars=80)
+        jersey = st.text_input("Jersey # (optional)", max_chars=10)
 
-            if active_pkgs is not None and not active_pkgs.empty:
-                def _label(row):
-                    return f'{row["name"]} — ${float(row["price"]):.2f}'
-                options = active_pkgs["id"].tolist()
-                labels = {row["id"]: _label(row) for _, row in active_pkgs.iterrows()}
-                selected_pkg_id = st.selectbox(
-                    "Package",
-                    options=options,
-                    format_func=lambda pid: labels.get(pid, pid),
-                    index=0,
-                    help="Select your photo package",
-                )
-                sel_row = active_pkgs.loc[active_pkgs["id"] == selected_pkg_id].iloc[0]
-                selected_price = float(sel_row["price"])
-                st.caption(f"Price: **${selected_price:.2f}**")
-                package_name_for_row = str(sel_row["name"])
-            else:
-                st.warning("No active packages configured. Add packages in the Manager page.")
-                selected_pkg_id = ""
-                selected_price = 0.0
-                sel_row = None
-                package_name_for_row = "Not selected"
+    with colB:
+        parent_email = st.text_input("Parent Email (for final photo delivery)")
+        parent_phone = st.text_input("Parent Phone")
 
-            notes = st.text_area("Notes (pose requests, etc.)")
+        # Dynamic Packages selector
+        if active_pkgs is not None and not active_pkgs.empty:
+            def _label(row):
+                return f'{row["name"]} — ${float(row["price"]):.2f}'
+            options = active_pkgs["id"].tolist()
+            labels = {row["id"]: _label(row) for _, row in active_pkgs.iterrows()}
+            selected_pkg_id = st.selectbox(
+                "Package",
+                options=options,
+                format_func=lambda pid: labels.get(pid, pid),
+                index=0,
+                help="Select your photo package",
+            )
+            sel_row = active_pkgs.loc[active_pkgs["id"] == selected_pkg_id].iloc[0]
+            selected_price = float(sel_row["price"])
+            st.caption(f"Price: **${selected_price:.2f}**")
+            package_name_for_row = str(sel_row["name"])
+        else:
+            st.warning("No active packages configured. Add packages in the Manager page.")
+            selected_pkg_id = ""
+            selected_price = 0.0
+            sel_row = None
+            package_name_for_row = "Not selected"
 
-# Load policy content from Settings (fallback to default text)
-policy_url  = gs_get_setting("POLICY_URL", "").strip()
-policy_text = gs_get_setting("POLICY_TEXT", "").strip() or DEFAULT_POLICY_TEXT
+        # --- Policy view + consent (enabled after reading) ---
+        notes = st.text_area("Notes (pose requests, etc.)")
+        policy_url  = gs_get_setting("POLICY_URL", "").strip()
+        policy_text = gs_get_setting("POLICY_TEXT", "").strip() or DEFAULT_POLICY_TEXT
+        with st.expander("View photo release / policy (tap to read)"):
+            if policy_url:
+                st.markdown(f"[Open full policy in a new tab]({policy_url})")
+            st.markdown(policy_text)
+            read_policy = st.checkbox("I have read the policy", key="read_policy")
+        release = st.checkbox(
+            "I agree to the photo release/policy",
+            disabled=not st.session_state.get("read_policy", False),
+        )
 
-# Step 1: View policy (inline expander)
-with st.expander("View photo release / policy (tap to read)"):
-    if policy_url:
-        st.markdown(f"[Open full policy in a new tab]({policy_url})", help="Opens the full document.")
-    st.markdown(policy_text)
-    read_policy = st.checkbox("I have read the policy", key="read_policy")
-
-# Step 2: Agree is disabled until 'read' is checked
-release = st.checkbox(
-    "I agree to the photo release/policy",
-    disabled=not st.session_state.get("read_policy", False),
-)
-
-
+        # Keep the Paid toggle in the same column for consistent layout
         paid = st.toggle(f"Paid (prepay or on-site) — ${selected_price:.2f}", value=False)
 
-        st.markdown("**Photo (required)** — choose one:")
-        cam = st.camera_input("Take photo with camera (preferred)")
-        up = st.file_uploader("Or upload an image file", type=["jpg","jpeg","png","heic","webp"])
+    # ---- Back at the form level (no extra indent) ----
+    st.markdown("**Photo (required)** — choose one:")
+    cam = st.camera_input("Take photo with camera (preferred)")
+    up = st.file_uploader("Or upload an image file", type=["jpg","jpeg","png","heic","webp"])
 
-        submitted = st.form_submit_button("Complete Check-In", type="primary")
+    submitted = st.form_submit_button("Complete Check-In", type="primary")
+
 
     if submitted:
         if not (first and last and team and parent_email and parent_phone and release):
