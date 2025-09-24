@@ -881,129 +881,97 @@ def page_kiosk():
     package_name_for_row = "Not selected"
     sel_row = None
 
-    # ------------------- FORM (be careful: every line is indented 4 spaces) -------------------
-    with st.form("kiosk_form", clear_on_submit=True):
-        colA, colB = st.columns(2)
+# ------------------- FORM (every indent is 4 spaces) -------------------
+with st.form("kiosk_form", clear_on_submit=False):
+    colA, colB = st.columns(2)
 
-                with colA:
-            st.markdown('<div id="first_name"></div>', unsafe_allow_html=True)
-            first = st.text_input(
-                REQUIRED_LABELS["first_name"],
-                max_chars=50, key="first_name"
-            )
-
-            st.markdown('<div id="last_name"></div>', unsafe_allow_html=True)
-            last = st.text_input(
-                REQUIRED_LABELS["last_name"],
-                max_chars=50, key="last_name"
-            )
-
-            st.markdown('<div id="team"></div>', unsafe_allow_html=True)
-            team = st.text_input(
-                REQUIRED_LABELS["team"],
-                max_chars=80, key="team"
-            )
-
-            jersey_label = REQUIRED_LABELS["jersey"] + ("" if req_cfg["jersey"] else " (optional)")
-            jersey = st.text_input(jersey_label, max_chars=10, key="jersey")
-
-        with colB:
-    st.markdown('<div id="parent_email"></div>', unsafe_allow_html=True)
-    parent_email = st.text_input(
-        REQUIRED_LABELS["parent_email"],
-        key="parent_email"
-    )
-
-    st.markdown('<div id="parent_phone"></div>', unsafe_allow_html=True)
-    parent_phone = st.text_input(
-        REQUIRED_LABELS["parent_phone"],
-        key="parent_phone"
-    )
-
-    # Package selector
-    package_label = REQUIRED_LABELS["package"] + ("" if req_cfg["package"] else " (optional)")
-    if not active_pkgs.empty:
-        def _label(row):
-            return f'{row["name"]} — ${float(row["price"]):.2f}'
-        options = active_pkgs["id"].tolist()
-        labels = {row["id"]: _label(row) for _, row in active_pkgs.iterrows()}
-        selected_pkg_id = st.selectbox(
-            package_label,
-            options=options,
-            format_func=lambda pid: labels.get(pid, pid),
-            index=0,
-            key="package_id",
+    with colA:
+        st.markdown('<div id="first_name"></div>', unsafe_allow_html=True)
+        first = st.text_input(
+            REQUIRED_LABELS["first_name"],
+            max_chars=50, key="first_name"
         )
-        sel_row = active_pkgs.loc[active_pkgs["id"] == selected_pkg_id].iloc[0]
-        selected_price = float(sel_row["price"])
-        package_name_for_row = str(sel_row["name"])
-        st.caption(f"Price: **${selected_price:.2f}**")
-    else:
-        if req_cfg["package"]:
-            st.error("Package is required, but no active packages are configured. Add packages in Manager.")
-        else:
-            st.warning("No active packages configured. Add packages in the Manager page.")
 
-    notes_label = REQUIRED_LABELS["notes"] + ("" if req_cfg["notes"] else " (optional)")
-    notes = st.text_area(notes_label, key="notes")
+        st.markdown('<div id="last_name"></div>', unsafe_allow_html=True)
+        last = st.text_input(
+            REQUIRED_LABELS["last_name"],
+            max_chars=50, key="last_name"
+        )
 
+        st.markdown('<div id="team"></div>', unsafe_allow_html=True)
+        team = st.text_input(
+            REQUIRED_LABELS["team"],
+            max_chars=80, key="team"
+        )
 
-            # Policy
-            ...
-            release = st.checkbox(
-                REQUIRED_LABELS["policy_agree"],
-                disabled=not st.session_state.get("read_policy", False),
-                key="agree_release",
+        jersey_label = REQUIRED_LABELS["jersey"] + ("" if req_cfg["jersey"] else " (optional)")
+        jersey = st.text_input(jersey_label, max_chars=10, key="jersey")
+
+    with colB:
+        st.markdown('<div id="parent_email"></div>', unsafe_allow_html=True)
+        parent_email = st.text_input(
+            REQUIRED_LABELS["parent_email"],
+            key="parent_email"
+        )
+
+        st.markdown('<div id="parent_phone"></div>', unsafe_allow_html=True)
+        parent_phone = st.text_input(
+            REQUIRED_LABELS["parent_phone"],
+            key="parent_phone"
+        )
+
+        # Package selector
+        package_label = REQUIRED_LABELS["package"] + ("" if req_cfg["package"] else " (optional)")
+        if not active_pkgs.empty:
+            def _label(row):
+                return f'{row["name"]} — ${float(row["price"]):.2f}'
+            options = active_pkgs["id"].tolist()
+            labels = {row["id"]: _label(row) for _, row in active_pkgs.iterrows()}
+            selected_pkg_id = st.selectbox(
+                package_label,
+                options=options,
+                format_func=lambda pid: labels.get(pid, pid),
+                index=0,
+                key="package_id",
             )
-
-
-        with colB:
-            parent_email = st.text_input("Parent Email (for final photo delivery)")
-            parent_phone = st.text_input("Parent Phone")
-
-            # Dynamic Packages selector
-            if not active_pkgs.empty:
-                def _label(row):
-                    return f'{row["name"]} — ${float(row["price"]):.2f}'
-                options = active_pkgs["id"].tolist()
-                labels = {row["id"]: _label(row) for _, row in active_pkgs.iterrows()}
-                selected_pkg_id = st.selectbox(
-                    "Package",
-                    options=options,
-                    format_func=lambda pid: labels.get(pid, pid),
-                    index=0,
-                    help="Select your photo package",
-                )
-                sel_row = active_pkgs.loc[active_pkgs["id"] == selected_pkg_id].iloc[0]
-                selected_price = float(sel_row["price"])
-                package_name_for_row = str(sel_row["name"])
-                st.caption(f"Price: **${selected_price:.2f}**")
+            sel_row = active_pkgs.loc[active_pkgs["id"] == selected_pkg_id].iloc[0]
+            selected_price = float(sel_row["price"])
+            package_name_for_row = str(sel_row["name"])
+            st.caption(f"Price: **${selected_price:.2f}**")
+        else:
+            if req_cfg["package"]:
+                st.error("Package is required, but no active packages are configured. Add packages in Manager.")
             else:
                 st.warning("No active packages configured. Add packages in the Manager page.")
 
-            # Policy view + consent
-            notes = st.text_area("Notes (pose requests, etc.)")
-            policy_url  = gs_get_setting("POLICY_URL", "").strip()
-            policy_text = gs_get_setting("POLICY_TEXT", "").strip() or DEFAULT_POLICY_TEXT
-            with st.expander("View photo release / policy (tap to read)"):
-                if policy_url:
-                    st.markdown(f"[Open full policy in a new tab]({policy_url})")
-                st.markdown(policy_text)
-                st.checkbox("I have read the policy", key="read_policy")
-            release = st.checkbox(
-                "I agree to the photo release/policy",
-                disabled=not st.session_state.get("read_policy", False),
-            )
+        notes_label = REQUIRED_LABELS["notes"] + ("" if req_cfg["notes"] else " (optional)")
+        notes = st.text_area(notes_label, key="notes")
 
-            # Paid toggle in same column for consistent layout
-            paid = st.toggle(f"Paid (prepay or on-site) — ${selected_price:.2f}", value=False)
+        # Policy view + consent
+        policy_url  = gs_get_setting("POLICY_URL", "").strip()
+        policy_text = gs_get_setting("POLICY_TEXT", "").strip() or DEFAULT_POLICY_TEXT
+        with st.expander("View photo release / policy (tap to read)"):
+            if policy_url:
+                st.markdown(f"[Open full policy in a new tab]({policy_url})")
+            st.markdown(policy_text)
+            st.checkbox("I have read the policy", key="read_policy")
+        release = st.checkbox(
+            REQUIRED_LABELS["policy_agree"],
+            disabled=not st.session_state.get("read_policy", False),
+            key="agree_release",
+        )
 
-        # Photo inputs (form level)
-        st.markdown("**Photo (required)** — choose one:")
-        cam = st.camera_input("Take photo with camera (preferred)")
-        up = st.file_uploader("Or upload an image file", type=["jpg", "jpeg", "png", "heic", "webp"])
+        # Paid toggle (same column)
+        paid = st.toggle(f"Paid (prepay or on-site) — ${selected_price:.2f}", value=False, key="paid_toggle")
 
-        submitted = st.form_submit_button("Complete Check-In", type="primary")
+    # Photo inputs (form level)
+    st.markdown('<div id="photo_section"></div>', unsafe_allow_html=True)
+    st.markdown("**Photo (required)** — choose one:")
+    cam = st.camera_input("Take photo with camera (preferred)", key="cam_photo")
+    up = st.file_uploader("Or upload an image file", type=["jpg", "jpeg", "png", "heic", "webp"], key="up_photo")
+
+    submitted = st.form_submit_button("Complete Check-In", type="primary")
+
     # ------------------- /FORM -------------------
 
     if submitted:
