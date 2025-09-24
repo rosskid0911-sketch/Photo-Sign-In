@@ -859,6 +859,9 @@ def page_kiosk():
     st.title(f"{BRAND_NAME} — Photo Day Check-In{title_suffix}")
     st.caption("Please complete all fields and upload a photo. A staff member can assist if needed.")
 
+    # Load Manager-defined "required" flags
+    req_cfg = get_required_config()
+
     # Load packages BEFORE the form so we can show price in the Paid toggle
     try:
         pkg_df = gs_read_packages()
@@ -876,129 +879,124 @@ def page_kiosk():
     else:
         active_pkgs = pd.DataFrame()
 
-    # Defaults so we can render the form even if no packages exist
+    # Defaults so form renders even if no packages exist
     selected_pkg_id = ""
     selected_price = 0.0
     package_name_for_row = "Not selected"
-    sel_row = None
 
-# ------------------- FORM (every indent is 4 spaces) -------------------
-with st.form("kiosk_form", clear_on_submit=False):
-    colA, colB = st.columns(2)
+    # ------------------- FORM (spaces only, no tabs) -------------------
+    with st.form("kiosk_form", clear_on_submit=False):
+        colA, colB = st.columns(2)
 
-    with colA:
-        st.markdown('<div id="first_name"></div>', unsafe_allow_html=True)
-        first = st.text_input(
-            REQUIRED_LABELS["first_name"],
-            max_chars=50, key="first_name"
-        )
+        with colA:
+            st.markdown('<div id="first_name"></div>', unsafe_allow_html=True)
+            first = st.text_input(REQUIRED_LABELS["first_name"], max_chars=50, key="first_name")
 
-        st.markdown('<div id="last_name"></div>', unsafe_allow_html=True)
-        last = st.text_input(
-            REQUIRED_LABELS["last_name"],
-            max_chars=50, key="last_name"
-        )
+            st.markdown('<div id="last_name"></div>', unsafe_allow_html=True)
+            last = st.text_input(REQUIRED_LABELS["last_name"], max_chars=50, key="last_name")
 
-        st.markdown('<div id="team"></div>', unsafe_allow_html=True)
-        team = st.text_input(
-            REQUIRED_LABELS["team"],
-            max_chars=80, key="team"
-        )
+            st.markdown('<div id="team"></div>', unsafe_allow_html=True)
+            team = st.text_input(REQUIRED_LABELS["team"], max_chars=80, key="team")
 
-        jersey_label = REQUIRED_LABELS["jersey"] + ("" if req_cfg["jersey"] else " (optional)")
-        jersey = st.text_input(jersey_label, max_chars=10, key="jersey")
+            jersey_label = REQUIRED_LABELS["jersey"] + ("" if req_cfg["jersey"] else " (optional)")
+            jersey = st.text_input(jersey_label, max_chars=10, key="jersey")
 
-    with colB:
-        st.markdown('<div id="parent_email"></div>', unsafe_allow_html=True)
-        parent_email = st.text_input(
-            REQUIRED_LABELS["parent_email"],
-            key="parent_email"
-        )
+        with colB:
+            st.markdown('<div id="parent_email"></div>', unsafe_allow_html=True)
+            parent_email = st.text_input(REQUIRED_LABELS["parent_email"], key="parent_email")
 
-        st.markdown('<div id="parent_phone"></div>', unsafe_allow_html=True)
-        parent_phone = st.text_input(
-            REQUIRED_LABELS["parent_phone"],
-            key="parent_phone"
-        )
+            st.markdown('<div id="parent_phone"></div>', unsafe_allow_html=True)
+            parent_phone = st.text_input(REQUIRED_LABELS["parent_phone"], key="parent_phone")
 
-        # Package selector
-        package_label = REQUIRED_LABELS["package"] + ("" if req_cfg["package"] else " (optional)")
-        if not active_pkgs.empty:
-            def _label(row):
-                return f'{row["name"]} — ${float(row["price"]):.2f}'
-            options = active_pkgs["id"].tolist()
-            labels = {row["id"]: _label(row) for _, row in active_pkgs.iterrows()}
-            selected_pkg_id = st.selectbox(
-                package_label,
-                options=options,
-                format_func=lambda pid: labels.get(pid, pid),
-                index=0,
-                key="package_id",
-            )
-            sel_row = active_pkgs.loc[active_pkgs["id"] == selected_pkg_id].iloc[0]
-            selected_price = float(sel_row["price"])
-            package_name_for_row = str(sel_row["name"])
-            st.caption(f"Price: **${selected_price:.2f}**")
-        else:
-            if req_cfg["package"]:
-                st.error("Package is required, but no active packages are configured. Add packages in Manager.")
+            # Package selector
+            package_label = REQUIRED_LABELS["package"] + ("" if req_cfg["package"] else " (optional)")
+            if not active_pkgs.empty:
+                def _label(row):
+                    return f'{row["name"]} — ${float(row["price"]):.2f}'
+                options = active_pkgs["id"].tolist()
+                labels = {row["id"]: _label(row) for _, row in active_pkgs.iterrows()}
+                selected_pkg_id = st.selectbox(
+                    package_label,
+                    options=options,
+                    format_func=lambda pid: labels.get(pid, pid),
+                    index=0,
+                    key="package_id",
+                )
+                sel_row = active_pkgs.loc[active_pkgs["id"] == selected_pkg_id].iloc[0]
+                selected_price = float(sel_row["price"])
+                package_name_for_row = str(sel_row["name"])
+                st.caption(f"Price: **${selected_price:.2f}**")
             else:
-                st.warning("No active packages configured. Add packages in the Manager page.")
+                if req_cfg["package"]:
+                    st.error("Package is required, but no active packages are configured. Add packages in Manager.")
+                else:
+                    st.warning("No active packages configured. Add packages in the Manager page.")
 
-        notes_label = REQUIRED_LABELS["notes"] + ("" if req_cfg["notes"] else " (optional)")
-        notes = st.text_area(notes_label, key="notes")
+            # Notes (optional if toggled off)
+            notes_label = REQUIRED_LABELS["notes"] + ("" if req_cfg["notes"] else " (optional)")
+            notes = st.text_area(notes_label, key="notes")
 
-        # Policy view + consent
-        policy_url  = gs_get_setting("POLICY_URL", "").strip()
-        policy_text = gs_get_setting("POLICY_TEXT", "").strip() or DEFAULT_POLICY_TEXT
-        with st.expander("View photo release / policy (tap to read)"):
-            if policy_url:
-                st.markdown(f"[Open full policy in a new tab]({policy_url})")
-            st.markdown(policy_text)
-            st.checkbox("I have read the policy", key="read_policy")
-        release = st.checkbox(
-            REQUIRED_LABELS["policy_agree"],
-            disabled=not st.session_state.get("read_policy", False),
-            key="agree_release",
-        )
+            # Policy view + consent
+            policy_url  = gs_get_setting("POLICY_URL", "").strip()
+            policy_text = gs_get_setting("POLICY_TEXT", "").strip() or DEFAULT_POLICY_TEXT
+            with st.expander("View photo release / policy (tap to read)"):
+                if policy_url:
+                    st.markdown(f"[Open full policy in a new tab]({policy_url})")
+                st.markdown(policy_text)
+                st.checkbox("I have read the policy", key="read_policy")
+            release = st.checkbox(
+                REQUIRED_LABELS["policy_agree"],
+                disabled=not st.session_state.get("read_policy", False),
+                key="agree_release",
+            )
 
-        # Paid toggle (same column)
-        paid = st.toggle(f"Paid (prepay or on-site) — ${selected_price:.2f}", value=False, key="paid_toggle")
+            # Paid toggle
+            st.toggle(f"Paid (prepay or on-site) — ${selected_price:.2f}", value=False, key="paid_toggle")
 
-    # Photo inputs (form level)
-    st.markdown('<div id="photo_section"></div>', unsafe_allow_html=True)
-    st.markdown("**Photo (required)** — choose one:")
-    cam = st.camera_input("Take photo with camera (preferred)", key="cam_photo")
-    up = st.file_uploader("Or upload an image file", type=["jpg", "jpeg", "png", "heic", "webp"], key="up_photo")
+        # Photo inputs (form level)
+        st.markdown('<div id="photo_section"></div>', unsafe_allow_html=True)
+        st.markdown("**Photo (required)** — choose one:")
+        st.camera_input("Take photo with camera (preferred)", key="cam_photo")
+        st.file_uploader("Or upload an image file", type=["jpg", "jpeg", "png", "heic", "webp"], key="up_photo")
 
-    submitted = st.form_submit_button("Complete Check-In", type="primary")
-
+        submitted = st.form_submit_button("Complete Check-In", type="primary")
     # ------------------- /FORM -------------------
 
     if submitted:
-        # Validate required fields
-        if not (first and last and team and parent_email and parent_phone and release):
-            st.error("Please complete all required fields and agree to the release.")
+        # Validate with dynamic required flags
+        missing = validate_required_dynamic(req_cfg)
+        if missing:
+            st.error("Please complete the missing information:")
+            st.markdown("\n".join([f"- **{label}**" for _, label in missing]))
+            scroll_to(missing[0][0])
             payment_footer()
             return
-        if not (cam or up):
-            st.error("Photo is required. Please use the camera or upload a file.")
-            payment_footer()
-            return
+
+        # Build values from session state (so we don't lose them on error)
+        first = st.session_state["first_name"].strip()
+        last = st.session_state["last_name"].strip()
+        team = st.session_state["team"].strip()
+        jersey = str(st.session_state.get("jersey") or "").strip()
+        parent_email = st.session_state["parent_email"].strip()
+        parent_phone = st.session_state["parent_phone"].strip()
+        notes = (st.session_state.get("notes") or "").strip()
+        paid = bool(st.session_state.get("paid_toggle", False))
 
         # IDs
         pid = gen_player_id(first, last, team)
         scode = short_code(pid)
 
         # Choose photo bytes & mimetype
-        if cam is not None:
-            photo_bytes = cam.getvalue()
-            mimetype = (cam.type or "image/jpeg").lower()
+        if st.session_state.get("cam_photo") is not None:
+            photo = st.session_state["cam_photo"]
+            photo_bytes = photo.getvalue()
+            mimetype = (photo.type or "image/jpeg").lower()
             ext = ".jpg" if "jpeg" in mimetype else ".png"
         else:
-            photo_bytes = up.getvalue()
-            mimetype = (up.type or "image/jpeg").lower()
-            name = (up.name or "").lower()
+            photo = st.session_state["up_photo"]
+            photo_bytes = photo.getvalue()
+            mimetype = (photo.type or "image/jpeg").lower()
+            name = (photo.name or "").lower()
             if name.endswith((".jpg", ".jpeg")):
                 ext = ".jpg"
             elif name.endswith(".png"):
@@ -1010,7 +1008,7 @@ with st.form("kiosk_form", clear_on_submit=False):
         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         base_name = f"{slugify(org_name)}_{slugify(team)}_{slugify(last)}_{slugify(first)}_{scode}_{ts}{ext}"
 
-        # Upload
+        # Upload (do NOT clear form on failure)
         try:
             fid, link = drive_upload_photo(base_name, photo_bytes, mimetype=mimetype)
         except Exception as e:
@@ -1024,17 +1022,17 @@ with st.form("kiosk_form", clear_on_submit=False):
             "ts": datetime.utcnow().isoformat(),
             "player_id": pid,
             "short_code": scode,
-            "first_name": first.strip(),
-            "last_name": last.strip(),
-            "team": team.strip(),
-            "parent_email": parent_email.strip(),
-            "parent_phone": parent_phone.strip(),
-            "confirmed_email": parent_email.strip(),
-            "confirmed_phone": parent_phone.strip(),
-            "jersey": str(jersey or "").strip(),
-            "confirmed_jersey": str(jersey or "").strip(),
+            "first_name": first,
+            "last_name": last,
+            "team": team,
+            "parent_email": parent_email,
+            "parent_phone": parent_phone,
+            "confirmed_email": parent_email,
+            "confirmed_phone": parent_phone,
+            "jersey": jersey,
+            "confirmed_jersey": jersey,
             "package": package_name_for_row,
-            "notes": notes.strip(),
+            "notes": notes,
             "release_accepted": True,
             "paid": "TRUE" if paid else "FALSE",
             "org_name": org_name,
@@ -1043,15 +1041,34 @@ with st.form("kiosk_form", clear_on_submit=False):
             "photo_filename": base_name,
             "photo_drive_id": fid,
             "photo_link": link,
-            "package_id": selected_pkg_id,
+            "package_id": st.session_state.get("package_id", ""),
             "package_name": package_name_for_row,
             "package_price": float(selected_price),
         }
-        sb_insert_checkin(new_row)
-        st.success("Checked in and photo uploaded! Thank you.")
 
-    # Payment options at bottom
+        # Save (do NOT clear form on failure)
+        try:
+            sb_insert_checkin(new_row)
+        except Exception as e:
+            st.error("There was an issue saving your check-in. Your entries were preserved.")
+            st.exception(e)
+            payment_footer()
+            return
+
+        # Success → now clear the form and rerun
+        st.success("Checked in and photo uploaded! Thank you.")
+        for k in [
+            "first_name", "last_name", "team", "jersey",
+            "parent_email", "parent_phone", "notes",
+            "read_policy", "agree_release", "paid_toggle", "package_id",
+            "cam_photo", "up_photo",
+        ]:
+            st.session_state.pop(k, None)
+        st.rerun()
+
+    # Render payment options at the bottom every render
     payment_footer()
+
 
 # ----------------------------- Router ----------------------------------------
 def main():
