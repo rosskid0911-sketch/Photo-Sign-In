@@ -98,6 +98,75 @@ def make_qr_image(payload: str, box_size: int = 10) -> Image.Image:
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
     return img
+# ---- Required-fields config & validation ----
+REQUIRED_LABELS = {
+    "first_name":   "Player First Name",
+    "last_name":    "Player Last Name",
+    "team":         "Team / Division",
+    "parent_email": "Parent Email (for final photo delivery)",
+    "parent_phone": "Parent Phone",
+    "jersey":       "Jersey #",
+    "package":      "Package",
+    "notes":        "Notes",
+    # special (non-text) requirements:
+    "policy_agree": "Agree to the photo release/policy",
+    "photo":        "Player Photo",
+}
+
+# Sensible defaults (can be changed in Manager)
+REQUIRED_DEFAULTS = {
+    "first_name":   True,
+    "last_name":    True,
+    "team":         True,
+    "parent_email": True,
+    "parent_phone": True,
+    "jersey":       False,
+    "package":      False,
+    "notes":        False,
+    "policy_agree": True,
+    "photo":        True,
+}
+
+def _as_bool(v) -> bool:
+    if isinstance(v, bool):
+        return v
+    s = str(v).strip().lower()
+    return s in {"true", "1", "yes", "y", "t"}
+
+def get_required_config() -> dict:
+    """Read per-field required flags from Settings sheet (fall back to defaults)."""
+    cfg = REQUIRED_DEFAULTS.copy()
+    for key in cfg.keys():
+        setting_key = "REQ_" + key.upper()
+        v = gs_get_setting(setting_key, "")
+        if v != "":
+            cfg[key] = _as_bool(v)
+    return cfg
+
+def save_required_config(cfg: dict) -> None:
+    """Persist per-field required flags to Settings sheet."""
+    for key, val in cfg.items():
+        gs_set_setting("REQ_" + key.upper(), "TRUE" if bool(val) else "FALSE")
+
+def validate_required_dynamic(cfg: dict) -> list[tuple[str, str]]:
+    """
+    Return list of (anchor_id, label) that are missing based on cfg flags.
+    Uses st.session_state values previously bound to input keys.
+    """
+    missing = []
+    # Text/choice fields
+    for k in ["first_name", "last_name", "team", "parent_email", "parent_phone", "jersey", "package", "notes"]:
+        if cfg.get(k, False):
+            v = st.session_state.get(k)
+            if v is None or (isinstance(v, str) and not v.strip()):
+                missing.append((k, REQUIRED_LABELS[k]))
+    # Policy agreement
+    if cfg.get("policy_agree", True) and not st.session_state.get("agree_release", False):
+        missing.append(("policy_read", REQUIRED_LABELS["policy_agree"]))
+    # Photo (camera or upload)
+    if cfg.get("photo", True) and (st.session_state.get("cam_photo") is None) and (st.session_state.get("up_photo") is None):
+        missing.append(("photo_section", REQUIRED_LABELS["photo"]))
+    return missing
 
 def slugify(s: str) -> str:
     return "".join(ch for ch in (s or "") if ch.isalnum()).lower()
@@ -666,6 +735,40 @@ def settings_section():
                     st.rerun()
         with c2:
             st.info("Tip: Keep prices numeric. You can hide a package by unchecking **Show in kiosk**.")
+    # --- Required Fields (Manager configurable) ---
+    with st.expander("Required Fields", expanded=False):
+        cfg = get_required_config()
+
+        c1, c2 = st.columns(2)
+        with c1:
+            r_first  = st.checkbox(REQUIRED_LABELS["first_name"],   value=cfg["first_name"],   key="rf_first")
+            r_last   = st.checkbox(REQUIRED_LABELS["last_name"],    value=cfg["last_name"],    key="rf_last")
+            r_team   = st.checkbox(REQUIRED_LABELS["team"],         value=cfg["team"],         key="rf_team")
+            r_email  = st.checkbox(REQUIRED_LABELS["parent_email"], value=cfg["parent_email"], key="rf_email")
+            r_phone  = st.checkbox(REQUIRED_LABELS["parent_phone"], value=cfg["parent_phone"], key="rf_phone")
+        with c2:
+            r_jersey = st.checkbox(REQUIRED_LABELS["jersey"],       value=cfg["jersey"],       key="rf_jersey")
+            r_pkg    = st.checkbox(REQUIRED_LABELS["package"],      value=cfg["package"],      key="rf_pkg")
+            r_notes  = st.checkbox(REQUIRED_LABELS["notes"],        value=cfg["notes"],        key="rf_notes")
+            r_policy = st.checkbox(REQUIRED_LABELS["policy_agree"], value=cfg["policy_agree"], key="rf_policy")
+            r_photo  = st.checkbox(REQUIRED_LABELS["photo"],        value=cfg["photo"],        key="rf_photo")
+
+        if st.button("Save required fields", type="primary"):
+            new_cfg = {
+                "first_name":   r_first,
+                "last_name":    r_last,
+                "team":         r_team,
+                "parent_email": r_email,
+                "parent_phone": r_phone,
+                "jersey":       r_jersey,
+                "package":      r_pkg,
+                "notes":        r_notes,
+                "policy_agree": r_policy,
+                "photo":        r_photo,
+            }
+            save_required_config(new_cfg)
+            st.success("Required fields saved.")
+            st.rerun()
 
     # --- Data management (Danger Zone) ---
     with st.expander("Data management (Danger Zone)", expanded=False):
@@ -743,6 +846,8 @@ def page_manager():
     st.info("This build has **no roster**. All data comes from the kiosk form with required photo upload.")
 
 # ----------------------------- Kiosk UI --------------------------------------
+    # Load Manager-defined "required" flags
+    req_cfg = get_required_config()
 def page_kiosk():
     st.markdown(BRAND_CSS, unsafe_allow_html=True)
 
@@ -780,11 +885,77 @@ def page_kiosk():
     with st.form("kiosk_form", clear_on_submit=True):
         colA, colB = st.columns(2)
 
-        with colA:
-            first = st.text_input("Player First Name", max_chars=50)
-            last = st.text_input("Player Last Name", max_chars=50)
-            team = st.text_input("Team / Division", max_chars=80)
-            jersey = st.text_input("Jersey # (optional)", max_chars=10)
+                with colA:
+            st.markdown('<div id="first_name"></div>', unsafe_allow_html=True)
+            first = st.text_input(
+                REQUIRED_LABELS["first_name"],
+                max_chars=50, key="first_name"
+            )
+
+            st.markdown('<div id="last_name"></div>', unsafe_allow_html=True)
+            last = st.text_input(
+                REQUIRED_LABELS["last_name"],
+                max_chars=50, key="last_name"
+            )
+
+            st.markdown('<div id="team"></div>', unsafe_allow_html=True)
+            team = st.text_input(
+                REQUIRED_LABELS["team"],
+                max_chars=80, key="team"
+            )
+
+            jersey_label = REQUIRED_LABELS["jersey"] + ("" if req_cfg["jersey"] else " (optional)")
+            jersey = st.text_input(jersey_label, max_chars=10, key="jersey")
+
+        with colB:
+    st.markdown('<div id="parent_email"></div>', unsafe_allow_html=True)
+    parent_email = st.text_input(
+        REQUIRED_LABELS["parent_email"],
+        key="parent_email"
+    )
+
+    st.markdown('<div id="parent_phone"></div>', unsafe_allow_html=True)
+    parent_phone = st.text_input(
+        REQUIRED_LABELS["parent_phone"],
+        key="parent_phone"
+    )
+
+    # Package selector
+    package_label = REQUIRED_LABELS["package"] + ("" if req_cfg["package"] else " (optional)")
+    if not active_pkgs.empty:
+        def _label(row):
+            return f'{row["name"]} — ${float(row["price"]):.2f}'
+        options = active_pkgs["id"].tolist()
+        labels = {row["id"]: _label(row) for _, row in active_pkgs.iterrows()}
+        selected_pkg_id = st.selectbox(
+            package_label,
+            options=options,
+            format_func=lambda pid: labels.get(pid, pid),
+            index=0,
+            key="package_id",
+        )
+        sel_row = active_pkgs.loc[active_pkgs["id"] == selected_pkg_id].iloc[0]
+        selected_price = float(sel_row["price"])
+        package_name_for_row = str(sel_row["name"])
+        st.caption(f"Price: **${selected_price:.2f}**")
+    else:
+        if req_cfg["package"]:
+            st.error("Package is required, but no active packages are configured. Add packages in Manager.")
+        else:
+            st.warning("No active packages configured. Add packages in the Manager page.")
+
+    notes_label = REQUIRED_LABELS["notes"] + ("" if req_cfg["notes"] else " (optional)")
+    notes = st.text_area(notes_label, key="notes")
+
+
+            # Policy
+            ...
+            release = st.checkbox(
+                REQUIRED_LABELS["policy_agree"],
+                disabled=not st.session_state.get("read_policy", False),
+                key="agree_release",
+            )
+
 
         with colB:
             parent_email = st.text_input("Parent Email (for final photo delivery)")
