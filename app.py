@@ -848,6 +848,7 @@ def page_manager():
 # ----------------------------- Kiosk UI --------------------------------------
     # Load Manager-defined "required" flags
     req_cfg = get_required_config()
+
 def page_kiosk():
     st.markdown(BRAND_CSS, unsafe_allow_html=True)
 
