@@ -1003,7 +1003,7 @@ def page_manager():
     st.info("This build has **no roster**. All data comes from the kiosk form with required photo upload.")
 
 # ----------------------------- Kiosk UI --------------------------------------
-    def page_kiosk():
+def page_kiosk():
     st.markdown(BRAND_CSS, unsafe_allow_html=True)
 
     # Header
