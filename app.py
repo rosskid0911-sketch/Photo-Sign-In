@@ -98,6 +98,126 @@ def make_qr_image(payload: str, box_size: int = 10) -> Image.Image:
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
     return img
+    # --- Roster helpers ---
+ROSTER_SHEET = "Roster"
+
+# Columns we care about
+_ROSTER_REQUIRED = ["first_name", "last_name", "team"]
+_ROSTER_OPTIONAL = ["jersey", "parent_email", "parent_phone"]
+_ROSTER_COMPUTED = ["player_id", "short_code", "checked_in_at", "photo_link"]
+_ROSTER_ALL = _ROSTER_REQUIRED + _ROSTER_OPTIONAL + _ROSTER_COMPUTED
+
+def _norm_header(s: str) -> str:
+    """Normalize arbitrary headers to snake_case we expect."""
+    s = str(s or "").strip().lower()
+    repl = {
+        "first": "first_name",
+        "firstname": "first_name",
+        "player first name": "first_name",
+        "player_first_name": "first_name",
+        "last": "last_name",
+        "lastname": "last_name",
+        "player last name": "last_name",
+        "player_last_name": "last_name",
+        "division": "team",
+        "team/division": "team",
+        "team name": "team",
+        "parent phone": "parent_phone",
+        "phone": "parent_phone",
+        "parent email": "parent_email",
+        "email": "parent_email",
+        "jersey #": "jersey",
+        "jersey number": "jersey",
+    }
+    return repl.get(s, s.replace(" ", "_").replace("-", "_"))
+
+def ensure_roster_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Coerce incoming df to a standard schema and compute ids."""
+    if df is None:
+        df = pd.DataFrame(columns=_ROSTER_ALL)
+
+    # Normalize headers
+    new_cols = [_norm_header(c) for c in df.columns]
+    df.columns = new_cols
+
+    # Keep only known columns, add missing
+    keep = [c for c in df.columns if c in _ROSTER_ALL]
+    df = df[keep].copy()
+    for col in _ROSTER_ALL:
+        if col not in df.columns:
+            df[col] = pd.NA
+
+    # Types / trims
+    for c in ["first_name", "last_name", "team", "jersey", "parent_email", "parent_phone"]:
+        df[c] = df[c].astype(str).fillna("").str.strip()
+
+    # Compute IDs where missing
+    need_id = df["player_id"].isna() | (df["player_id"].astype(str).str.len() == 0)
+    for i in df.index[need_id]:
+        pid = gen_player_id(df.at[i, "first_name"], df.at[i, "last_name"], df.at[i, "team"])
+        df.at[i, "player_id"] = pid
+        df.at[i, "short_code"] = short_code(pid)
+
+    # Ensure computed columns exist
+    for c in _ROSTER_COMPUTED:
+        if c not in df.columns:
+            df[c] = pd.NA
+
+    # Minimal required checks (don’t write rows missing core fields)
+    df = df[(df["first_name"].str.len() > 0) & (df["last_name"].str.len() > 0) & (df["team"].str.len() > 0)].reset_index(drop=True)
+    return df
+
+@st.cache_data(show_spinner=False)
+def gs_read_roster() -> pd.DataFrame:
+    """Read roster, auto-create sheet with headers if missing/empty."""
+    try:
+        df = gs_read_df(ROSTER_SHEET)
+    except Exception:
+        df = pd.DataFrame()
+    if df is None or df.empty:
+        # seed with headers only
+        seed = pd.DataFrame(columns=_ROSTER_ALL)
+        gs_write_df(ROSTER_SHEET, seed)
+        try:
+            gs_read_df.clear()
+        except Exception:
+            st.cache_data.clear()
+        return seed.copy()
+    return ensure_roster_df(df)
+
+def gs_write_roster(df: pd.DataFrame):
+    clean = ensure_roster_df(df)
+    gs_write_df(ROSTER_SHEET, clean)
+    try:
+        gs_read_df.clear()
+        gs_read_roster.clear()
+    except Exception:
+        st.cache_data.clear()
+
+def roster_lookup_options(df: pd.DataFrame) -> list[tuple[str, str]]:
+    """Return (player_id, label) tuples for selectbox."""
+    opts = []
+    for _, r in df.iterrows():
+        lab = f'{r.get("team","")}: {r.get("last_name","").upper()}, {r.get("first_name","")} ' \
+              f'{"(#"+str(r.get("jersey"))+")" if str(r.get("jersey","")).strip() else ""} ' \
+              f'[{r.get("short_code","")}]'
+        opts.append((str(r["player_id"]), " ".join(lab.split())))
+    return opts
+
+def roster_get_row(df: pd.DataFrame, player_id: str) -> dict:
+    hit = df[df["player_id"].astype(str) == str(player_id)]
+    return (hit.iloc[0].to_dict() if not hit.empty else {})
+
+def roster_mark_checked_in(player_id: str, ts_iso: str, photo_link: str = ""):
+    """Mark the roster row as checked-in; update photo_link if provided."""
+    df = gs_read_roster()
+    mask = df["player_id"].astype(str) == str(player_id)
+    if mask.any():
+        df.loc[mask, "checked_in_at"] = ts_iso
+        if photo_link:
+            df.loc[mask, "photo_link"] = photo_link
+        gs_write_roster(df)
+        
 # ---- Required-fields config & validation ----
 REQUIRED_LABELS = {
     "first_name":   "Player First Name",
@@ -769,6 +889,43 @@ def settings_section():
             save_required_config(new_cfg)
             st.success("Required fields saved.")
             st.rerun()
+    # --- Roster (upload & template) ---
+    with st.expander("Roster", expanded=False):
+        st.caption("Upload a roster CSV/XLSX to enable name lookup and auto-fill on the kiosk.")
+        colT, colU = st.columns([1,2])
+
+        with colT:
+            # Download CSV template
+            tmpl = pd.DataFrame(columns=["First Name","Last Name","Team","Jersey","# Parent Email","Parent Phone"])
+            # (The header names can be anything; we normalize on import.)
+            csv_bytes = tmpl.to_csv(index=False).encode("utf-8")
+            st.download_button("Download CSV Template", data=csv_bytes, file_name="roster_template.csv")
+
+        with colU:
+            f = st.file_uploader("Upload roster file (.csv or .xlsx)", type=["csv","xlsx"])
+            if f is not None:
+                try:
+                    if f.name.lower().endswith(".csv"):
+                        raw = pd.read_csv(f)
+                    else:
+                        raw = pd.read_excel(f)
+                    st.write("Preview:", raw.head(8))
+                    cleaned = ensure_roster_df(raw)
+                    st.write("Detected columns (normalized):", list(cleaned.columns))
+                    if st.button("Save roster to Google Sheets", type="primary"):
+                        gs_write_roster(cleaned)
+                        st.success(f"Saved {len(cleaned)} roster rows to the 'Roster' tab.")
+                        st.rerun()
+                except Exception as e:
+                    st.error("Could not read that file. Make sure it’s a valid CSV/XLSX.")
+                    st.exception(e)
+
+        # Show current roster size
+        try:
+            cur = gs_read_roster()
+            st.caption(f"Current roster rows: **{0 if cur is None else len(cur)}**")
+        except Exception:
+            st.caption("Current roster rows: (not available)")
 
     # --- Data management (Danger Zone) ---
     with st.expander("Data management (Danger Zone)", expanded=False):
@@ -846,10 +1003,7 @@ def page_manager():
     st.info("This build has **no roster**. All data comes from the kiosk form with required photo upload.")
 
 # ----------------------------- Kiosk UI --------------------------------------
-    # Load Manager-defined "required" flags
-    req_cfg = get_required_config()
-
-def page_kiosk():
+    def page_kiosk():
     st.markdown(BRAND_CSS, unsafe_allow_html=True)
 
     # Header
@@ -859,10 +1013,10 @@ def page_kiosk():
     st.title(f"{BRAND_NAME} — Photo Day Check-In{title_suffix}")
     st.caption("Please complete all fields and upload a photo. A staff member can assist if needed.")
 
-    # Load Manager-defined "required" flags
+    # Manager-defined required flags
     req_cfg = get_required_config()
 
-    # Load packages BEFORE the form so we can show price in the Paid toggle
+    # Packages
     try:
         pkg_df = gs_read_packages()
     except Exception:
@@ -871,7 +1025,7 @@ def page_kiosk():
     def _as_bool(v):
         if isinstance(v, bool):
             return v
-        return str(v).strip().lower() in {"true", "1", "yes", "y", "t"}
+        return str(v).strip().lower() in {"true","1","yes","y","t"}
 
     if not pkg_df.empty and "active" in pkg_df.columns:
         mask = pkg_df["active"].map(_as_bool)
@@ -879,34 +1033,92 @@ def page_kiosk():
     else:
         active_pkgs = pd.DataFrame()
 
+    # Roster
+    roster_df = gs_read_roster()
+    has_roster = roster_df is not None and not roster_df.empty
+
+    mode = "Manual entry"
+    if has_roster:
+        mode = st.radio(
+            "How would you like to check in?",
+            ["Find my name (roster)", "Manual entry"],
+            horizontal=True,
+        )
+
     # Defaults so form renders even if no packages exist
     selected_pkg_id = ""
     selected_price = 0.0
     package_name_for_row = "Not selected"
 
-    # ------------------- FORM (spaces only, no tabs) -------------------
+    # ------------------- FORM -------------------
     with st.form("kiosk_form", clear_on_submit=False):
+        # Roster pre-select
+        lock_names = False
+        prefill = {}
+
+        if has_roster and mode == "Find my name (roster)":
+            teams = sorted([t for t in roster_df["team"].dropna().unique() if str(t).strip()])
+            tsel = st.selectbox("Filter by team (optional)", ["(All)"] + teams, index=0)
+            df_list = roster_df if tsel == "(All)" else roster_df[roster_df["team"].astype(str).str.lower() == str(tsel).lower()]
+
+            opts = roster_lookup_options(df_list)
+            if not opts:
+                st.warning("No roster rows match that team. Switch to Manual entry or upload a roster in Manager.")
+            else:
+                pid_list = [pid for pid, _ in opts]
+                label_map = {pid: lab for pid, lab in opts}
+                chosen_pid = st.selectbox("Select your name", options=pid_list, format_func=lambda x: label_map.get(x, x))
+                if chosen_pid:
+                    prefill = roster_get_row(roster_df, chosen_pid)
+                    lock_names = True  # lock name/team fields so spelling stays consistent
+
         colA, colB = st.columns(2)
 
         with colA:
             st.markdown('<div id="first_name"></div>', unsafe_allow_html=True)
-            first = st.text_input(REQUIRED_LABELS["first_name"], max_chars=50, key="first_name")
+            first = st.text_input(
+                REQUIRED_LABELS["first_name"],
+                max_chars=50, key="first_name",
+                value=prefill.get("first_name","") if prefill else st.session_state.get("first_name",""),
+                disabled=lock_names
+            )
 
             st.markdown('<div id="last_name"></div>', unsafe_allow_html=True)
-            last = st.text_input(REQUIRED_LABELS["last_name"], max_chars=50, key="last_name")
+            last = st.text_input(
+                REQUIRED_LABELS["last_name"],
+                max_chars=50, key="last_name",
+                value=prefill.get("last_name","") if prefill else st.session_state.get("last_name",""),
+                disabled=lock_names
+            )
 
             st.markdown('<div id="team"></div>', unsafe_allow_html=True)
-            team = st.text_input(REQUIRED_LABELS["team"], max_chars=80, key="team")
+            team = st.text_input(
+                REQUIRED_LABELS["team"],
+                max_chars=80, key="team",
+                value=prefill.get("team","") if prefill else st.session_state.get("team",""),
+                disabled=lock_names
+            )
 
             jersey_label = REQUIRED_LABELS["jersey"] + ("" if req_cfg["jersey"] else " (optional)")
-            jersey = st.text_input(jersey_label, max_chars=10, key="jersey")
+            jersey = st.text_input(
+                jersey_label, max_chars=10, key="jersey",
+                value=prefill.get("jersey","") if prefill else st.session_state.get("jersey","")
+            )
 
         with colB:
             st.markdown('<div id="parent_email"></div>', unsafe_allow_html=True)
-            parent_email = st.text_input(REQUIRED_LABELS["parent_email"], key="parent_email")
+            parent_email = st.text_input(
+                REQUIRED_LABELS["parent_email"],
+                key="parent_email",
+                value=prefill.get("parent_email","") if prefill else st.session_state.get("parent_email","")
+            )
 
             st.markdown('<div id="parent_phone"></div>', unsafe_allow_html=True)
-            parent_phone = st.text_input(REQUIRED_LABELS["parent_phone"], key="parent_phone")
+            parent_phone = st.text_input(
+                REQUIRED_LABELS["parent_phone"],
+                key="parent_phone",
+                value=prefill.get("parent_phone","") if prefill else st.session_state.get("parent_phone","")
+            )
 
             # Package selector
             package_label = REQUIRED_LABELS["package"] + ("" if req_cfg["package"] else " (optional)")
@@ -932,19 +1144,22 @@ def page_kiosk():
                 else:
                     st.warning("No active packages configured. Add packages in the Manager page.")
 
-            # Notes (optional if toggled off)
             notes_label = REQUIRED_LABELS["notes"] + ("" if req_cfg["notes"] else " (optional)")
-            notes = st.text_area(notes_label, key="notes")
+            notes = st.text_area(
+                notes_label, key="notes",
+                value=prefill.get("notes","") if prefill else st.session_state.get("notes","")
+            )
 
             # Policy view + consent
+            st.markdown('<div id="policy_read"></div>', unsafe_allow_html=True)
             policy_url  = gs_get_setting("POLICY_URL", "").strip()
-            policy_text = gs_get_setting("POLICY_TEXT", "").strip() or DEFAULT_POLICY_TEXT
+            policy_text = gs_get_setting("POLICY_TEXT", "").strip() or "By checking this box, I agree to Photography By TR’s photo policy and release."
             with st.expander("View photo release / policy (tap to read)"):
                 if policy_url:
                     st.markdown(f"[Open full policy in a new tab]({policy_url})")
                 st.markdown(policy_text)
                 st.checkbox("I have read the policy", key="read_policy")
-            release = st.checkbox(
+            st.checkbox(
                 REQUIRED_LABELS["policy_agree"],
                 disabled=not st.session_state.get("read_policy", False),
                 key="agree_release",
@@ -963,16 +1178,20 @@ def page_kiosk():
     # ------------------- /FORM -------------------
 
     if submitted:
-        # Validate with dynamic required flags
+        # Validate with dynamic required flags (uses st.session_state keys)
         missing = validate_required_dynamic(req_cfg)
         if missing:
             st.error("Please complete the missing information:")
             st.markdown("\n".join([f"- **{label}**" for _, label in missing]))
-            scroll_to(missing[0][0])
+            # scroll_to helper (you already added it earlier)
+            try:
+                scroll_to(missing[0][0])
+            except Exception:
+                pass
             payment_footer()
             return
 
-        # Build values from session state (so we don't lose them on error)
+        # Gather values
         first = st.session_state["first_name"].strip()
         last = st.session_state["last_name"].strip()
         team = st.session_state["team"].strip()
@@ -997,18 +1216,15 @@ def page_kiosk():
             photo_bytes = photo.getvalue()
             mimetype = (photo.type or "image/jpeg").lower()
             name = (photo.name or "").lower()
-            if name.endswith((".jpg", ".jpeg")):
-                ext = ".jpg"
-            elif name.endswith(".png"):
-                ext = ".png"
-            else:
-                ext = ".jpg"
+            if name.endswith((".jpg", ".jpeg")): ext = ".jpg"
+            elif name.endswith(".png"): ext = ".png"
+            else: ext = ".jpg"
 
         # Filename
         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         base_name = f"{slugify(org_name)}_{slugify(team)}_{slugify(last)}_{slugify(first)}_{scode}_{ts}{ext}"
 
-        # Upload (do NOT clear form on failure)
+        # Upload
         try:
             fid, link = drive_upload_photo(base_name, photo_bytes, mimetype=mimetype)
         except Exception as e:
@@ -1017,7 +1233,7 @@ def page_kiosk():
             payment_footer()
             return
 
-        # Row for Sheets
+        # Build row
         new_row = {
             "ts": datetime.utcnow().isoformat(),
             "player_id": pid,
@@ -1046,7 +1262,7 @@ def page_kiosk():
             "package_price": float(selected_price),
         }
 
-        # Save (do NOT clear form on failure)
+        # Save to Sheets
         try:
             sb_insert_checkin(new_row)
         except Exception as e:
@@ -1055,18 +1271,26 @@ def page_kiosk():
             payment_footer()
             return
 
-        # Success → now clear the form and rerun
+        # If roster-based, stamp the roster row as checked-in
+        if prefill.get("player_id"):
+            roster_mark_checked_in(
+                player_id=str(prefill["player_id"]),
+                ts_iso=new_row["ts"],
+                photo_link=new_row.get("photo_link",""),
+            )
+
+        # Success → clear and rerun
         st.success("Checked in and photo uploaded! Thank you.")
         for k in [
-            "first_name", "last_name", "team", "jersey",
-            "parent_email", "parent_phone", "notes",
-            "read_policy", "agree_release", "paid_toggle", "package_id",
-            "cam_photo", "up_photo",
+            "first_name","last_name","team","jersey",
+            "parent_email","parent_phone","notes",
+            "read_policy","agree_release","paid_toggle","package_id",
+            "cam_photo","up_photo",
         ]:
             st.session_state.pop(k, None)
         st.rerun()
 
-    # Render payment options at the bottom every render
+    # Payment buttons at bottom
     payment_footer()
 
 
