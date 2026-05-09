@@ -1173,7 +1173,6 @@ def page_kiosk():
                 st.checkbox("I have read the policy", key="read_policy")
             st.checkbox(
                 REQUIRED_LABELS["policy_agree"],
-                disabled=not st.session_state.get("read_policy", False),
                 key="agree_release",
             )
 
