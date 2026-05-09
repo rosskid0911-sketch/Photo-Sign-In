@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import base64, io
 from pathlib import Path
-import requests  # add 'requests' to requirements.txt
+import requests  # add 'r to requirements.txt
 
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
@@ -659,41 +659,49 @@ DEFAULT_PACKAGES = [
     {"id": "TEAM",   "name": "Team Photo Add-on",  "price": 10.00, "active": False, "note": ""},
 ]
 
+
 # Settings KV
 SETTINGS_SHEET = "Settings"
 
 def gs_get_setting(key: str, default: str = "") -> str:
     df = gs_read_df(SETTINGS_SHEET)
+
     if df.empty or "key" not in df.columns:
         return default
+
     hit = df[df["key"] == key]
+
     if not hit.empty:
         return str(hit.iloc[0]["value"]) if pd.notna(hit.iloc[0]["value"]) else default
+
     return default
-   
-  # --- Photo Release / Policy editor ---
-    with st.expander("Photo Release / Policy", expanded=False):
-        current_text = gs_get_setting("POLICY_TEXT", "")
-        current_url  = gs_get_setting("POLICY_URL", "")
 
-        policy_text = st.text_area(
-            "Policy text (shown in kiosk)",
-            value=(current_text or DEFAULT_POLICY_TEXT),
-            height=240,
-            help="This appears in the kiosk under 'View policy'.",
-        )
-        policy_url = st.text_input(
-            "Policy URL (optional)",
-            value=current_url,
-            placeholder="https://... (PDF or public web page)",
-            help="If provided, the kiosk shows an 'Open full policy' link (opens in a new tab).",
-        )
 
-        if st.button("Save policy"):
-            gs_set_setting("POLICY_TEXT", policy_text)
-            gs_set_setting("POLICY_URL", policy_url)
-            st.success("Policy saved.")
+def gs_set_setting(key: str, value: str):
+    df = gs_read_df(SETTINGS_SHEET)
 
+    # Create empty settings dataframe if needed
+    if df.empty or "key" not in df.columns:
+        df = pd.DataFrame(columns=["key", "value"])
+
+    # Update existing key
+    if not df.empty and key in df["key"].values:
+        df.loc[df["key"] == key, "value"] = str(value)
+    else:
+        # Add new setting
+        new_row = pd.DataFrame([{
+            "key": key,
+            "value": str(value)
+        }])
+
+        df = pd.concat([df, new_row], ignore_index=True)
+
+    gs_write_df(SETTINGS_SHEET, df)
+
+    try:
+        gs_read_df.clear()
+    except Exception:
+        st.cache_data.clear()
 # Check-ins
 def sb_insert_checkin(row: dict):
     existing = gs_read_df("Checkins")
@@ -740,14 +748,6 @@ def gcs_upload_photo(filename: str, data: bytes, mimetype: str = "image/jpeg"):
     return blob.name, url
 
 
-    # Make public (simple). If you prefer signed URLs, ask me and I’ll swap to signed URLs.
-    try:
-        blob.make_public()
-        url = blob.public_url
-    except Exception:
-        # Fallback: long-lived signed URL if public ACLs are restricted
-        url = blob.generate_signed_url(version="v4", expiration=60*60*24*365, method="GET")
-    return blob.name, url
 def drive_upload_photo(filename: str, data: bytes, mimetype: str = "image/jpeg"):
     # If a GCS bucket is configured, use it instead of Drive
     if st.secrets.get("GCS_BUCKET"):
@@ -1003,6 +1003,18 @@ def page_manager():
     st.info("This build has **no roster**. All data comes from the kiosk form with required photo upload.")
 
 # ----------------------------- Kiosk UI --------------------------------------
+def scroll_to(anchor_id: str):
+    st.markdown(
+        f"""
+        <script>
+        const el = window.parent.document.getElementById("{anchor_id}");
+        if (el) {{
+            el.scrollIntoView({{ behavior: "smooth", block: "center" }});
+        }}
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
 def page_kiosk():
     st.markdown(BRAND_CSS, unsafe_allow_html=True)
 
@@ -1346,4 +1358,6 @@ if str(st.secrets.get("RUN_TESTS", "")).strip().lower() in {"1", "true", "yes"}:
     _run_smoke_tests()
 
 if __name__ == "__main__":
+    main()
+
     main()
